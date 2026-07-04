@@ -15,7 +15,7 @@ from .config import CrawlConfig
 from .fetcher import Fetcher
 from .frontier import Frontier
 from .models import CrawlStats
-from .parser import parse_page
+from .parser import parse_extract_rules, parse_page
 from .robots import RobotsCache
 from .sitemap import fetch_sitemap_urls
 
@@ -28,8 +28,13 @@ class CrawlEngine:
 
         self._work: "queue.Queue" = queue.Queue()   # (url, depth, found_on)
         self._frontier = Frontier(config)
-        self._fetcher = Fetcher(config)
+        if config.render_js:
+            from .jsfetch import JsFetcher  # deferred: optional playwright dependency
+            self._fetcher = JsFetcher(config)
+        else:
+            self._fetcher = Fetcher(config)
         self._robots = RobotsCache(config.user_agent) if config.respect_robots else None
+        self._extract_rules = parse_extract_rules(config.extract_rules)  # ValueError if malformed
         self._stats = CrawlStats()
         self._results = []  # retained for site-level checks (duplicates)
         self._stats_lock = threading.Lock()
@@ -112,7 +117,7 @@ class CrawlEngine:
         parsed = None
         if body:
             base = result.redirected_to or url
-            parsed = parse_page(base, body)
+            parsed = parse_page(base, body, self._extract_rules)
             self._apply_parsed(result, parsed)
             if depth < self.config.max_depth and not self._stop.is_set():
                 for link in parsed.links:
@@ -139,6 +144,7 @@ class CrawlEngine:
         result.word_count = parsed.word_count
         result.meta_robots = parsed.meta_robots
         result.content_hash = parsed.content_hash
+        result.extracted = parsed.extracted
         for link in parsed.links:
             if self._frontier.same_site(link):
                 result.internal_links += 1

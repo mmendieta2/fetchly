@@ -18,6 +18,11 @@ SITE = {
     "robots.txt": "User-agent: *\nDisallow: /private/\n",
     "private/secret.html": "<html><head><title>Secret</title></head><body></body></html>",
     "orphan.html": "<html><head><title>Orphan</title></head><body>unlinked</body></html>",
+    # Content injected client-side; used by the optional JS-rendering tests.
+    # The marker is concatenated at runtime so it never appears in the raw source.
+    "jspage.html": """<html><head><title>JS</title></head><body><div id="app"></div>
+        <script>document.getElementById('app').textContent = 'RENDERED-BY-' + 'JS';</script>
+        </body></html>""",
     # {base} is replaced with the server's base URL once the port is known.
     "sitemap.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

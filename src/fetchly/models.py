@@ -30,6 +30,7 @@ class PageResult:
     images_missing_alt: int = 0
     word_count: int = 0
     content_hash: str = ""
+    extracted: dict = field(default_factory=dict)  # custom-extraction values, extra CSV columns
 
     CSV_FIELDS = (
         "url", "status_code", "ok", "depth", "found_on", "content_type",
@@ -41,7 +42,9 @@ class PageResult:
     )
 
     def as_row(self) -> dict:
-        return {f: getattr(self, f) for f in self.CSV_FIELDS}
+        row = {f: getattr(self, f) for f in self.CSV_FIELDS}
+        row.update(self.extracted)
+        return row
 
 
 @dataclass

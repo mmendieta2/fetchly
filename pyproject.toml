@@ -16,9 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+js = ["playwright>=1.40"]
 
 [project.scripts]
 fetchly = "fetchly.cli:main"
+fetchly-compare = "fetchly.compare:main"
 
 [project.gui-scripts]
 fetchly-gui = "fetchly.gui.app:main"

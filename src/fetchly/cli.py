@@ -29,10 +29,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--subdomains", action="store_true", help="Also crawl subdomains")
     p.add_argument("--all-domains", action="store_true", help="Do not restrict to the start domain")
     p.add_argument("--no-robots", action="store_true", help="Ignore robots.txt")
+    p.add_argument("--render-js", action="store_true",
+                   help="Render pages with headless Chromium "
+                        "(needs: pip install \"fetchly[js]\" && playwright install chromium)")
     p.add_argument("--no-orphan-check", action="store_true",
                    help="Skip the sitemap.xml orphan-page check")
     p.add_argument("--exclude", action="append", default=[], help="Skip URLs containing this substring (repeatable)")
     p.add_argument("--sitemap", metavar="FILE", help="Also generate an XML sitemap of indexable pages")
+    p.add_argument("--graph", metavar="FILE",
+                   help="Also generate a self-contained HTML link-graph visualization")
+    p.add_argument("--extract", action="append", default=[], metavar="RULE",
+                   help="Custom extraction: name=css:selector or name=re:pattern "
+                        "(repeatable; adds a CSV column per rule)")
     p.add_argument("-q", "--quiet", action="store_true")
     return p
 
@@ -77,16 +85,19 @@ def main(argv=None) -> int:
         respect_robots=not args.no_robots,
         check_orphans=not args.no_orphan_check,
         exclude_patterns=args.exclude,
+        extract_rules=args.extract,
+        render_js=args.render_js,
     )
 
     try:
         engine = CrawlEngine(config)
         engine.start()
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    report = CsvReport(args.output)
+    extract_names = [rule.split("=", 1)[0].strip() for rule in args.extract]
+    report = CsvReport(args.output, extra_fields=extract_names)
     issues = []
     results = []
     finished = None
@@ -130,6 +141,11 @@ def main(argv=None) -> int:
     if args.sitemap:
         count = write_sitemap(args.sitemap, results)
         print(f"Sitemap: {args.sitemap} ({count} indexable URLs)")
+
+    if args.graph:
+        from .viz import write_graph
+        count = write_graph(args.graph, results)
+        print(f"Graph: {args.graph} ({count} nodes)")
 
     s = finished.stats
     errors = sum(1 for i in issues if i.severity == "error")

@@ -1,10 +1,34 @@
-"""HTML parsing: extract audit data and outgoing links from a page."""
+"""HTML parsing: extract audit data, outgoing links, and custom data."""
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
+
+_MAX_EXTRACT_MATCHES = 5
+
+
+def parse_extract_rules(specs: "list[str]") -> "list[tuple[str, str, str]]":
+    """Parse 'name=css:selector' / 'name=re:pattern' specs into (name, kind, pattern).
+
+    Raises ValueError on a malformed spec so front ends can reject it early.
+    """
+    rules = []
+    for spec in specs:
+        name, sep, rest = spec.partition("=")
+        kind, sep2, pattern = rest.partition(":")
+        if not sep or not sep2 or not name.strip() or kind not in ("css", "re") or not pattern:
+            raise ValueError(
+                f"bad extract rule {spec!r} (expected name=css:selector or name=re:pattern)")
+        if kind == "re":
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"bad regex in extract rule {spec!r}: {exc}")
+        rules.append((name.strip(), kind, pattern))
+    return rules
 
 
 @dataclass
@@ -21,6 +45,7 @@ class ParsedPage:
     mixed_content: "list[str]" = field(default_factory=list)  # http:// resources on an https page
     meta_robots: str = ""       # content of <meta name="robots">, lowercased
     content_hash: str = ""      # md5 of normalized visible text, for duplicate detection
+    extracted: dict = field(default_factory=dict)  # rule name -> " | "-joined matches
 
 
 # Tags whose fetched resources cause mixed-content warnings on https pages.
@@ -31,9 +56,17 @@ _RESOURCE_TAGS = (
 )
 
 
-def parse_page(base_url: str, html: str) -> ParsedPage:
+def parse_page(base_url: str, html: str, extract_rules=()) -> ParsedPage:
     soup = BeautifulSoup(html, "html.parser")
     page = ParsedPage()
+
+    for name, kind, pattern in extract_rules:
+        if kind == "css":
+            matches = [el.get_text(" ", strip=True) for el in soup.select(pattern)]
+        else:
+            matches = ["".join(m) if isinstance(m, tuple) else m
+                       for m in re.findall(pattern, html)]
+        page.extracted[name] = " | ".join(matches[:_MAX_EXTRACT_MATCHES])
 
     if soup.title and soup.title.string:
         page.title = soup.title.string.strip()

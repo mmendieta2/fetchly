@@ -72,6 +72,9 @@ python -m fetchly.gui.app
 | `--sitemap FILE` | also generate an XML sitemap of indexable pages | — |
 | `--url-list FILE` | audit a fixed URL list (one per line) instead of crawling | — |
 | `--no-orphan-check` | skip the sitemap orphan check | off |
+| `--graph FILE` | self-contained HTML link-graph visualization | — |
+| `--extract RULE` | custom extraction: `name=css:selector` or `name=re:pattern` (repeatable; each rule adds a CSV column) | — |
+| `--render-js` | render pages with headless Chromium (see below) | off |
 
 `--url-list` is for site migrations: it fetches exactly the listed URLs
 (depth 0, any domain) and reports status/redirect/audit data for each. The
@@ -118,6 +121,29 @@ The orphan check fetches `/sitemap.xml` (sitemap indexes supported) after the
 crawl finishes; it is skipped when the crawl was truncated by the page limit
 or stopped early, since that would report false orphans. Disable it with
 `--no-orphan-check`.
+
+## More tools
+
+- **`fetchly-compare old.csv new.csv`** — diff two page reports: added/removed
+  URLs and per-URL changes to status, title, meta description, canonical,
+  redirect target, and word count. Use it to track audit progress or compare
+  staging vs production crawls.
+- **Link graph** (`--graph out.html` or the GUI's Export Graph button): a
+  single offline HTML file with a draggable force-directed view of the crawl;
+  blue = ok, amber = redirected, red = broken; click a node to open the URL.
+- **JavaScript rendering** for React/Vue/Angular sites:
+  ```bash
+  pip install "fetchly[js]"
+  playwright install chromium     # one-time browser download, no account needed
+  fetchly https://spa.example.com --render-js
+  ```
+  Rendering is serialized through one headless Chromium, so it is much slower
+  than the default fetcher — use it only for JS-dependent sites. Retries and
+  temporary-vs-permanent redirect detail are not available in this mode.
+- **Scheduled audits** — the CLI is cron-friendly. Weekly example:
+  ```
+  0 6 * * 1 /home/may/code/fetchly/.venv/bin/fetchly https://yoursite.com -q -o /home/may/audits/site-$(date +\%F).csv
+  ```
 
 ## Platform notes
 

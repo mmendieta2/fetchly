@@ -68,12 +68,25 @@ class FetchlyApp(ttk.Frame):
         ttk.Entry(form, textvariable=self.retries_var, width=7).grid(
             row=3, column=1, sticky="w", padx=(4, 12), pady=(6, 0))
 
+        self.extract_var = tk.StringVar(value="")
+        ttk.Label(form, text="Extract:").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        extract_entry = ttk.Entry(form, textvariable=self.extract_var)
+        extract_entry.grid(row=4, column=1, columnspan=5, sticky="ew", padx=(4, 0), pady=(6, 0))
+        extract_entry.insert(0, "")
+        ttk.Label(form, foreground="#777",
+                  text='Optional, ";"-separated: name=css:selector or name=re:pattern'
+                  ).grid(row=5, column=1, columnspan=5, sticky="w", padx=(4, 0))
+
         self.subdomains_var = tk.BooleanVar(value=False)
         self.robots_var = tk.BooleanVar(value=True)
+        self.render_js_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(form, text="Include subdomains", variable=self.subdomains_var).grid(
             row=2, column=2, columnspan=2, sticky="w")
         ttk.Checkbutton(form, text="Respect robots.txt", variable=self.robots_var).grid(
             row=2, column=4, columnspan=2, sticky="w")
+        ttk.Checkbutton(form, text="Render JavaScript (needs fetchly[js])",
+                        variable=self.render_js_var).grid(
+            row=3, column=2, columnspan=4, sticky="w")
 
         form.columnconfigure(5, weight=1)
 
@@ -88,6 +101,9 @@ class FetchlyApp(ttk.Frame):
         self.sitemap_btn = ttk.Button(buttons, text="Export Sitemap…",
                                       command=self._export_sitemap, state="disabled")
         self.sitemap_btn.pack(side="left", padx=6)
+        self.graph_btn = ttk.Button(buttons, text="Export Graph…",
+                                    command=self._export_graph, state="disabled")
+        self.graph_btn.pack(side="left")
         self.progress = ttk.Progressbar(buttons, mode="determinate", length=220)
         self.progress.pack(side="right")
 
@@ -135,8 +151,10 @@ class FetchlyApp(ttk.Frame):
             num_workers=int(self.workers_var.get()),
             delay_seconds=float(self.delay_var.get() or 0),
             max_retries=int(self.retries_var.get() or 0),
+            extract_rules=[r.strip() for r in self.extract_var.get().split(";") if r.strip()],
             include_subdomains=self.subdomains_var.get(),
             respect_robots=self.robots_var.get(),
+            render_js=self.render_js_var.get(),
         )
 
     def _start(self) -> None:
@@ -144,7 +162,7 @@ class FetchlyApp(ttk.Frame):
             config = self._read_config()
             engine = CrawlEngine(config)
             engine.start()
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             messagebox.showerror("Invalid settings", str(exc))
             return
         self.engine = engine
@@ -158,6 +176,7 @@ class FetchlyApp(ttk.Frame):
         self.stop_btn.configure(state="normal")
         self.export_btn.configure(state="disabled")
         self.sitemap_btn.configure(state="disabled")
+        self.graph_btn.configure(state="disabled")
         self.status_var.set(f"Crawling {config.start_url}…")
         self.root.after(POLL_MS, self._poll)
 
@@ -211,6 +230,7 @@ class FetchlyApp(ttk.Frame):
         self.stop_btn.configure(state="disabled")
         self.export_btn.configure(state="normal" if self.results else "disabled")
         self.sitemap_btn.configure(state="normal" if self.results else "disabled")
+        self.graph_btn.configure(state="normal" if self.results else "disabled")
         s = event.stats
         suffix = " (stopped)" if event.stopped_by_user else ""
         errors = sum(1 for i in self.issues if i.severity == "error")
@@ -225,7 +245,12 @@ class FetchlyApp(ttk.Frame):
             initialfile="fetchly_report.csv")
         if not path:
             return
-        write_report(path, self.results)
+        extract_names = []
+        for r in self.results:
+            for name in r.extracted:
+                if name not in extract_names:
+                    extract_names.append(name)
+        write_report(path, self.results, extra_fields=extract_names)
         issues_path = issues_path_for(path)
         write_issues(issues_path, self.issues)
         self.status_var.set(f"Saved {path} and {issues_path}")
@@ -239,6 +264,17 @@ class FetchlyApp(ttk.Frame):
             return
         count = write_sitemap(path, self.results)
         self.status_var.set(f"Sitemap saved to {path} ({count} indexable URLs)")
+
+    def _export_graph(self) -> None:
+        path = filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
+            initialfile="crawl_graph.html")
+        if not path:
+            return
+        from ..viz import write_graph
+        count = write_graph(path, self.results)
+        self.status_var.set(f"Graph saved to {path} ({count} nodes)")
 
     def _on_close(self) -> None:
         if self.engine:

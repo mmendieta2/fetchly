@@ -8,12 +8,16 @@ from .models import PageResult
 
 
 class CsvReport:
-    """Incremental CSV writer so results survive an interrupted crawl."""
+    """Incremental CSV writer so results survive an interrupted crawl.
 
-    def __init__(self, path: str):
+    extra_fields adds columns for custom-extraction rule names.
+    """
+
+    def __init__(self, path: str, extra_fields=()):
         self.path = path
         self._file = open(path, "w", newline="", encoding="utf-8")
-        self._writer = csv.DictWriter(self._file, fieldnames=PageResult.CSV_FIELDS)
+        fieldnames = tuple(PageResult.CSV_FIELDS) + tuple(extra_fields)
+        self._writer = csv.DictWriter(self._file, fieldnames=fieldnames, restval="")
         self._writer.writeheader()
 
     def add(self, result: PageResult) -> None:
@@ -23,8 +27,8 @@ class CsvReport:
         self._file.close()
 
 
-def write_report(path: str, results: "list[PageResult]") -> None:
-    report = CsvReport(path)
+def write_report(path: str, results: "list[PageResult]", extra_fields=()) -> None:
+    report = CsvReport(path, extra_fields)
     try:
         for r in results:
             report.add(r)
