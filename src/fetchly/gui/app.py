@@ -99,6 +99,11 @@ class FetchlyApp(ttk.Frame):
         ttk.Entry(form, textvariable=self.login_fields_var, show="*").grid(
             row=8, column=4, columnspan=2, sticky="ew", padx=(4, 0), pady=(6, 0))
 
+        self.user_agent_var = tk.StringVar(value=CrawlConfig.user_agent)
+        ttk.Label(form, text="User agent:").grid(row=9, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.user_agent_var).grid(
+            row=9, column=1, columnspan=5, sticky="ew", padx=(4, 0), pady=(6, 0))
+
         self.subdomains_var = tk.BooleanVar(value=False)
         self.robots_var = tk.BooleanVar(value=True)
         self.render_js_var = tk.BooleanVar(value=False)
@@ -257,6 +262,7 @@ class FetchlyApp(ttk.Frame):
             num_workers=int(self.workers_var.get()),
             delay_seconds=float(self.delay_var.get() or 0),
             max_retries=int(self.retries_var.get() or 0),
+            user_agent=self.user_agent_var.get().strip() or CrawlConfig.user_agent,
             extract_rules=[r.strip() for r in self.extract_var.get().split(";") if r.strip()],
             segment_rules=[r.strip() for r in self.segments_var.get().split(";") if r.strip()],
             robots_txt_file=self.robots_file_var.get().strip(),

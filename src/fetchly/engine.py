@@ -12,7 +12,7 @@ import time
 from . import events
 import re as _re
 
-from .audit import (audit_page, find_duplicates, find_hreflang_issues,
+from .audit import (Issue, audit_page, find_duplicates, find_hreflang_issues,
                     find_near_duplicates, find_orphans)
 from .config import CrawlConfig
 from .fetcher import Fetcher
@@ -46,12 +46,14 @@ class CrawlEngine:
                     robots_override = fh.read()
             except OSError as exc:
                 raise ValueError(f"cannot read robots file: {exc}")
-        self._robots = (RobotsCache(config.user_agent, override_text=robots_override)
+        self._robots = (RobotsCache(config.user_agent, override_text=robots_override,
+                                    session=self._fetcher.session)
                         if config.respect_robots else None)
         self._extract_rules = parse_extract_rules(config.extract_rules)  # ValueError if malformed
         self._segment_rules = self._parse_segment_rules(config.segment_rules)
         self._stats = CrawlStats()
         self._results = []  # retained for site-level checks (duplicates)
+        self._blocked = []  # blocked_by_robots issues (no PageResult to attach to)
         self._stats_lock = threading.Lock()
         self._stop = threading.Event()
         self._pages_claimed = 0
@@ -143,6 +145,10 @@ class CrawlEngine:
         if self._robots and not self._robots.allowed(url):
             with self._stats_lock:
                 self._stats.skipped += 1
+                self._blocked.append(Issue(
+                    url, "blocked_by_robots", "error",
+                    "not read — disallowed by robots.txt"
+                    + (f" (linked from {found_on})" if found_on else " (start URL)")))
             self.events.put(events.UrlSkipped(url=url, reason="robots.txt"))
             return
 
@@ -210,10 +216,13 @@ class CrawlEngine:
             site_issues = find_duplicates(self._results)
             site_issues.extend(find_near_duplicates(self._results))
             site_issues.extend(find_hreflang_issues(self._results))
+            site_issues.extend(self._blocked)
+            crawled = self._stats.crawled
 
-        # Orphan check: only meaningful when the crawl saw the whole site;
-        # a truncated crawl would report false orphans.
-        if self.config.check_orphans and not stopped_early:
+        # Orphan check: only meaningful when the crawl actually saw the site.
+        # Skip it when nothing was crawled (every sitemap URL would look
+        # orphaned) or when a truncated crawl would report false orphans.
+        if self.config.check_orphans and not stopped_early and crawled > 0:
             sitemap_urls = fetch_sitemap_urls(self._fetcher.session, self.config.start_url,
                                               timeout=self.config.timeout_seconds)
             site_issues.extend(find_orphans(sitemap_urls, self._frontier))

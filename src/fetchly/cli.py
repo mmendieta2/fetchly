@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-w", "--workers", type=int, default=8)
     p.add_argument("--delay", type=float, default=0.0, help="Delay between requests per worker (s)")
     p.add_argument("--timeout", type=float, default=15.0)
+    p.add_argument("--user-agent", metavar="UA",
+                   help="User-Agent header (set a browser UA to get past bot protection)")
     p.add_argument("--retries", type=int, default=2,
                    help="Extra attempts on connection errors and 429/5xx")
     p.add_argument("--subdomains", action="store_true", help="Also crawl subdomains")
@@ -108,6 +110,7 @@ def main(argv=None) -> int:
         delay_seconds=args.delay,
         timeout_seconds=args.timeout,
         max_retries=args.retries,
+        user_agent=args.user_agent or CrawlConfig.user_agent,
         same_domain_only=not args.all_domains,
         include_subdomains=args.subdomains,
         respect_robots=not args.no_robots,

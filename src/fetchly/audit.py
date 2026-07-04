@@ -51,8 +51,13 @@ def audit_page(result: PageResult, parsed: "ParsedPage | None") -> "list[Issue]"
         return issues
     if result.status_code >= 400:
         where = f"linked from {result.found_on}" if result.found_on else "start URL"
-        issues.append(Issue(result.url, "broken_link", SEVERITY_ERROR,
-                            f"HTTP {result.status_code}, {where}"))
+        if result.status_code in (401, 403):
+            issues.append(Issue(result.url, "access_forbidden", SEVERITY_ERROR,
+                                f"not read — HTTP {result.status_code} (login required or "
+                                f"bot protection; try a browser --user-agent), {where}"))
+        else:
+            issues.append(Issue(result.url, "broken_link", SEVERITY_ERROR,
+                                f"HTTP {result.status_code}, {where}"))
         return issues  # error pages aren't judged on content quality
 
     if result.redirect_hops >= 2:

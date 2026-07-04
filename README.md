@@ -89,6 +89,7 @@ python -m fetchly.gui.app
 | `-w/--workers` | concurrent workers | 8 |
 | `--delay` | per-worker delay (s) | 0 |
 | `--retries` | extra attempts on connection errors / 429 / 5xx | 2 |
+| `--user-agent UA` | User-Agent header (set a browser UA to get past bot protection) | FetchlyBot/… |
 | `--subdomains` | crawl subdomains too | off |
 | `--all-domains` | no domain restriction | off |
 | `--no-robots` | ignore robots.txt | off |
@@ -128,6 +129,8 @@ the same list in the GUI's **Issues** tab. Checks:
 | Issue | Severity | Meaning |
 |---|---|---|
 | `broken_link` | error | 4xx/5xx page; detail names the page linking to it |
+| `access_forbidden` | error | 401/403 — page not read (login required or bot protection; try `--user-agent`) |
+| `blocked_by_robots` | error | page not read — disallowed by robots.txt |
 | `fetch_error` | error | connection failure/timeout after retries |
 | `redirect_loop` | error | URL redirects to itself (or exceeds 30 hops) |
 | `mixed_content` | error | `http://` scripts/images/styles on an `https://` page |
