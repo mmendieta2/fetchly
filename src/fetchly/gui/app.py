@@ -61,6 +61,11 @@ class FetchlyApp(ttk.Frame):
         ttk.Label(form, text="Delay (s):").grid(row=2, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.delay_var, width=7).grid(row=2, column=1, sticky="w", padx=(4, 12))
 
+        self.retries_var = tk.StringVar(value="2")
+        ttk.Label(form, text="Retries:").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.retries_var, width=7).grid(
+            row=3, column=1, sticky="w", padx=(4, 12), pady=(6, 0))
+
         self.subdomains_var = tk.BooleanVar(value=False)
         self.robots_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(form, text="Include subdomains", variable=self.subdomains_var).grid(
@@ -110,6 +115,7 @@ class FetchlyApp(ttk.Frame):
             max_depth=int(self.max_depth_var.get()),
             num_workers=int(self.workers_var.get()),
             delay_seconds=float(self.delay_var.get() or 0),
+            max_retries=int(self.retries_var.get() or 0),
             include_subdomains=self.subdomains_var.get(),
             respect_robots=self.robots_var.get(),
         )

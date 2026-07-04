@@ -11,6 +11,8 @@ class CrawlConfig:
     num_workers: int = 8
     delay_seconds: float = 0.0
     timeout_seconds: float = 15.0
+    max_retries: int = 2          # extra attempts on connection errors / 429 / 5xx
+    retry_backoff_seconds: float = 0.5  # doubled after each failed attempt
     same_domain_only: bool = True
     include_subdomains: bool = False
     respect_robots: bool = True

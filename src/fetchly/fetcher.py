@@ -9,6 +9,7 @@ from .models import PageResult
 
 _HTML_TYPES = ("text/html", "application/xhtml+xml")
 _MAX_BODY_BYTES = 5 * 1024 * 1024
+_RETRY_STATUSES = (429, 502, 503, 504)
 
 
 class Fetcher:
@@ -21,7 +22,23 @@ class Fetcher:
         })
 
     def fetch(self, url: str, depth: int) -> "tuple[PageResult, str]":
-        """Fetch a URL; return (result, html_body). Body is '' for non-HTML."""
+        """Fetch with retries on transient failures; return (result, html_body).
+
+        Retries connection errors/timeouts and 429/502/503/504 up to
+        config.max_retries extra attempts with doubling backoff. Returns the
+        last attempt's result; body is '' for non-HTML or errors.
+        """
+        backoff = self.config.retry_backoff_seconds
+        for attempt in range(self.config.max_retries + 1):
+            result, body = self._fetch_once(url, depth)
+            transient = bool(result.error) or result.status_code in _RETRY_STATUSES
+            if not transient or attempt == self.config.max_retries:
+                return result, body
+            time.sleep(backoff)
+            backoff *= 2
+        return result, body
+
+    def _fetch_once(self, url: str, depth: int) -> "tuple[PageResult, str]":
         result = PageResult(url=url, depth=depth)
         started = time.monotonic()
         try:
