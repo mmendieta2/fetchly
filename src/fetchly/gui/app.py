@@ -24,6 +24,7 @@ class FetchlyApp(ttk.Frame):
         super().__init__(root, padding=10)
         self.root = root
         self.engine = None
+        self._last_config = None
         self.results = []
         self.issues = []
         root.title("Fetchly — Website Crawler")
@@ -77,6 +78,25 @@ class FetchlyApp(ttk.Frame):
                   text='Optional, ";"-separated: name=css:selector or name=re:pattern'
                   ).grid(row=5, column=1, columnspan=5, sticky="w", padx=(4, 0))
 
+        self.segments_var = tk.StringVar(value="")
+        ttk.Label(form, text="Segments:").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.segments_var).grid(
+            row=6, column=1, columnspan=5, sticky="ew", padx=(4, 0), pady=(6, 0))
+
+        self.robots_file_var = tk.StringVar(value="")
+        ttk.Label(form, text="Robots file:").grid(row=7, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.robots_file_var).grid(
+            row=7, column=1, columnspan=3, sticky="ew", padx=(4, 0), pady=(6, 0))
+
+        self.login_url_var = tk.StringVar(value="")
+        self.login_fields_var = tk.StringVar(value="")
+        ttk.Label(form, text="Login URL:").grid(row=8, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.login_url_var).grid(
+            row=8, column=1, columnspan=2, sticky="ew", padx=(4, 12), pady=(6, 0))
+        ttk.Label(form, text="Login fields:").grid(row=8, column=3, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.login_fields_var, show="*").grid(
+            row=8, column=4, columnspan=2, sticky="ew", padx=(4, 0), pady=(6, 0))
+
         self.subdomains_var = tk.BooleanVar(value=False)
         self.robots_var = tk.BooleanVar(value=True)
         self.render_js_var = tk.BooleanVar(value=False)
@@ -104,6 +124,10 @@ class FetchlyApp(ttk.Frame):
         self.graph_btn = ttk.Button(buttons, text="Export Graph…",
                                     command=self._export_graph, state="disabled")
         self.graph_btn.pack(side="left")
+        self.save_btn = ttk.Button(buttons, text="Save Crawl…",
+                                   command=self._save_crawl, state="disabled")
+        self.save_btn.pack(side="left", padx=6)
+        ttk.Button(buttons, text="Open Crawl…", command=self._open_crawl).pack(side="left")
 
     def _make_tree(self, parent, headers) -> ttk.Treeview:
         tree = ttk.Treeview(parent, columns=tuple(headers), show="headings")
@@ -126,8 +150,8 @@ class FetchlyApp(ttk.Frame):
         self.notebook.add(pages_tab, text="Pages")
         self.tree = self._make_tree(pages_tab, {
             "status": ("Status", 70, False), "depth": ("Depth", 60, False),
-            "time": ("ms", 70, False), "title": ("Title", 260, True),
-            "url": ("URL", 420, True)})
+            "time": ("ms", 70, False), "segment": ("Segment", 90, False),
+            "title": ("Title", 240, True), "url": ("URL", 400, True)})
 
         issues_tab = ttk.Frame(self.notebook)
         self.notebook.add(issues_tab, text="Issues")
@@ -150,6 +174,11 @@ class FetchlyApp(ttk.Frame):
             delay_seconds=float(self.delay_var.get() or 0),
             max_retries=int(self.retries_var.get() or 0),
             extract_rules=[r.strip() for r in self.extract_var.get().split(";") if r.strip()],
+            segment_rules=[r.strip() for r in self.segments_var.get().split(";") if r.strip()],
+            robots_txt_file=self.robots_file_var.get().strip(),
+            login_url=self.login_url_var.get().strip(),
+            login_data=dict(f.split("=", 1) for f in self.login_fields_var.get().split(";")
+                            if "=" in f),
             include_subdomains=self.subdomains_var.get(),
             respect_robots=self.robots_var.get(),
             render_js=self.render_js_var.get(),
@@ -164,6 +193,7 @@ class FetchlyApp(ttk.Frame):
             messagebox.showerror("Invalid settings", str(exc))
             return
         self.engine = engine
+        self._last_config = config
         self.results = []
         self.issues = []
         self.tree.delete(*self.tree.get_children())
@@ -174,6 +204,7 @@ class FetchlyApp(ttk.Frame):
         self.export_btn.configure(state="disabled")
         self.sitemap_btn.configure(state="disabled")
         self.graph_btn.configure(state="disabled")
+        self.save_btn.configure(state="disabled")
         self.status_var.set(f"Crawling {config.start_url}…")
         self.root.after(POLL_MS, self._poll)
 
@@ -205,7 +236,8 @@ class FetchlyApp(ttk.Frame):
         self.results.append(r)
         tags = ("error",) if (r.error or r.status_code >= 400) else ()
         self.tree.insert("", "end", values=(
-            r.status_code or "ERR", r.depth, r.elapsed_ms, r.title, r.url), tags=tags)
+            r.status_code or "ERR", r.depth, r.elapsed_ms, r.segment, r.title, r.url),
+            tags=tags)
         s = event.stats
         self.status_var.set(
             f"Crawled {s.crawled}  |  queued {s.queued}  |  errors {s.errors}  |  "
@@ -227,6 +259,7 @@ class FetchlyApp(ttk.Frame):
         self.export_btn.configure(state="normal" if self.results else "disabled")
         self.sitemap_btn.configure(state="normal" if self.results else "disabled")
         self.graph_btn.configure(state="normal" if self.results else "disabled")
+        self.save_btn.configure(state="normal" if self.results else "disabled")
         s = event.stats
         suffix = " (stopped)" if event.stopped_by_user else ""
         errors = sum(1 for i in self.issues if i.severity == "error")
@@ -271,6 +304,48 @@ class FetchlyApp(ttk.Frame):
         from ..viz import write_graph
         count = write_graph(path, self.results)
         self.status_var.set(f"Graph saved to {path} ({count} nodes)")
+
+    def _save_crawl(self) -> None:
+        path = filedialog.asksaveasfilename(
+            defaultextension=".fetchly.json.gz",
+            filetypes=[("Fetchly crawls", "*.fetchly.json.gz"), ("All files", "*.*")],
+            initialfile="crawl.fetchly.json.gz")
+        if not path:
+            return
+        from ..session_io import save_crawl
+        save_crawl(path, self._last_config, self.results, self.issues)
+        self.status_var.set(f"Crawl saved to {path}")
+
+    def _open_crawl(self) -> None:
+        path = filedialog.askopenfilename(
+            filetypes=[("Fetchly crawls", "*.fetchly.json.gz"), ("All files", "*.*")])
+        if not path:
+            return
+        from ..session_io import load_crawl
+        try:
+            config, results, issues = load_crawl(path)
+        except (OSError, ValueError, KeyError) as exc:
+            messagebox.showerror("Cannot open crawl", str(exc))
+            return
+        self._last_config = config
+        self.results = list(results)
+        self.issues = []
+        self.tree.delete(*self.tree.get_children())
+        self.issues_tree.delete(*self.issues_tree.get_children())
+        for r in self.results:
+            tags = ("error",) if (r.error or r.status_code >= 400) else ()
+            self.tree.insert("", "end", values=(
+                r.status_code or "ERR", r.depth, r.elapsed_ms, r.segment, r.title, r.url),
+                tags=tags)
+        self._add_issues(issues)
+        self.notebook.tab(1, text=f"Issues ({len(self.issues)})" if self.issues else "Issues")
+        self.export_btn.configure(state="normal" if self.results else "disabled")
+        self.sitemap_btn.configure(state="normal" if self.results else "disabled")
+        self.graph_btn.configure(state="normal" if self.results else "disabled")
+        self.save_btn.configure(state="normal" if self.results else "disabled")
+        self.status_var.set(
+            f"Opened {path}: {len(self.results)} pages, {len(self.issues)} issues "
+            f"(crawl of {config.start_url})")
 
     def _on_close(self) -> None:
         if self.engine:

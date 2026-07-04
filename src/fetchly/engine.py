@@ -10,7 +10,10 @@ import threading
 import time
 
 from . import events
-from .audit import audit_page, find_duplicates, find_orphans
+import re as _re
+
+from .audit import (audit_page, find_duplicates, find_hreflang_issues,
+                    find_near_duplicates, find_orphans)
 from .config import CrawlConfig
 from .fetcher import Fetcher
 from .frontier import Frontier
@@ -29,12 +32,24 @@ class CrawlEngine:
         self._work: "queue.Queue" = queue.Queue()   # (url, depth, found_on)
         self._frontier = Frontier(config)
         if config.render_js:
+            if config.login_url:
+                raise ValueError("forms authentication is not yet supported with JS rendering")
             from .jsfetch import JsFetcher  # deferred: optional playwright dependency
             self._fetcher = JsFetcher(config)
         else:
             self._fetcher = Fetcher(config)
-        self._robots = RobotsCache(config.user_agent) if config.respect_robots else None
+
+        robots_override = ""
+        if config.robots_txt_file:
+            try:
+                with open(config.robots_txt_file, encoding="utf-8") as fh:
+                    robots_override = fh.read()
+            except OSError as exc:
+                raise ValueError(f"cannot read robots file: {exc}")
+        self._robots = (RobotsCache(config.user_agent, override_text=robots_override)
+                        if config.respect_robots else None)
         self._extract_rules = parse_extract_rules(config.extract_rules)  # ValueError if malformed
+        self._segment_rules = self._parse_segment_rules(config.segment_rules)
         self._stats = CrawlStats()
         self._results = []  # retained for site-level checks (duplicates)
         self._stats_lock = threading.Lock()
@@ -43,6 +58,29 @@ class CrawlEngine:
         self._in_flight = 0
         self._state_lock = threading.Lock()
         self._threads: "list[threading.Thread]" = []
+
+    @staticmethod
+    def _parse_segment_rules(specs):
+        rules = []
+        for spec in specs:
+            name, sep, pattern = spec.partition("=")
+            if not sep or not name.strip() or not pattern:
+                raise ValueError(f"bad segment rule {spec!r} (expected name=substring or name=re:pattern)")
+            if pattern.startswith("re:"):
+                try:
+                    matcher = _re.compile(pattern[3:]).search
+                except _re.error as exc:
+                    raise ValueError(f"bad regex in segment rule {spec!r}: {exc}")
+            else:
+                matcher = lambda url, _p=pattern: _p in url
+            rules.append((name.strip(), matcher))
+        return rules
+
+    def _segment_for(self, url: str) -> str:
+        for name, matcher in self._segment_rules:
+            if matcher(url):
+                return name
+        return ""
 
     # -- public API ---------------------------------------------------------
 
@@ -113,6 +151,7 @@ class CrawlEngine:
 
         result, body = self._fetcher.fetch(url, depth)
         result.found_on = found_on
+        result.segment = self._segment_for(url)
 
         parsed = None
         if body:
@@ -122,6 +161,10 @@ class CrawlEngine:
             if depth < self.config.max_depth and not self._stop.is_set():
                 for link in parsed.links:
                     admitted = self._frontier.admit(link)
+                    if admitted:
+                        self._work.put((admitted, depth + 1, url))
+                if parsed.amp_url:  # crawl the AMP variant too
+                    admitted = self._frontier.admit(parsed.amp_url)
                     if admitted:
                         self._work.put((admitted, depth + 1, url))
 
@@ -144,6 +187,13 @@ class CrawlEngine:
         result.word_count = parsed.word_count
         result.meta_robots = parsed.meta_robots
         result.content_hash = parsed.content_hash
+        result.simhash = parsed.simhash
+        result.hreflang = parsed.hreflang
+        result.hreflang_count = len(parsed.hreflang)
+        result.schema_types = "|".join(parsed.schema_types)
+        result.schema_errors = parsed.schema_errors
+        result.amp_url = parsed.amp_url
+        result.is_amp = parsed.is_amp
         result.extracted = parsed.extracted
         for link in parsed.links:
             if self._frontier.same_site(link):
@@ -158,6 +208,8 @@ class CrawlEngine:
 
         with self._stats_lock:
             site_issues = find_duplicates(self._results)
+            site_issues.extend(find_near_duplicates(self._results))
+            site_issues.extend(find_hreflang_issues(self._results))
 
         # Orphan check: only meaningful when the crawl saw the whole site;
         # a truncated crawl would report false orphans.

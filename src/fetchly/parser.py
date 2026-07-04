@@ -1,11 +1,40 @@
 """HTML parsing: extract audit data, outgoing links, and custom data."""
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
+
+
+def simhash64(words: "list[str]") -> int:
+    """64-bit SimHash over word 3-grams for near-duplicate detection."""
+    if not words:
+        return 0
+    votes = [0] * 64
+    for i in range(max(1, len(words) - 2)):
+        shingle = " ".join(words[i:i + 3])
+        h = int(hashlib.md5(shingle.encode("utf-8")).hexdigest()[:16], 16)
+        for bit in range(64):
+            votes[bit] += 1 if (h >> bit) & 1 else -1
+    return sum(1 << bit for bit in range(64) if votes[bit] > 0)
+
+
+def _jsonld_types(data) -> "list[str]":
+    types = []
+    if isinstance(data, dict):
+        t = data.get("@type")
+        if isinstance(t, str):
+            types.append(t)
+        elif isinstance(t, list):
+            types.extend(x for x in t if isinstance(x, str))
+        types.extend(_jsonld_types(data.get("@graph", [])))
+    elif isinstance(data, list):
+        for item in data:
+            types.extend(_jsonld_types(item))
+    return types
 
 _MAX_EXTRACT_MATCHES = 5
 
@@ -45,6 +74,12 @@ class ParsedPage:
     mixed_content: "list[str]" = field(default_factory=list)  # http:// resources on an https page
     meta_robots: str = ""       # content of <meta name="robots">, lowercased
     content_hash: str = ""      # md5 of normalized visible text, for duplicate detection
+    simhash: int = 0            # near-duplicate fingerprint (simhash64)
+    hreflang: "list[tuple]" = field(default_factory=list)  # (lang, absolute url)
+    schema_types: "list[str]" = field(default_factory=list)  # JSON-LD @type values
+    schema_errors: int = 0      # unparseable JSON-LD blocks
+    amp_url: str = ""           # <link rel="amphtml"> target, absolute
+    is_amp: bool = False        # <html amp> / <html ⚡>
     extracted: dict = field(default_factory=dict)  # rule name -> " | "-joined matches
 
 
@@ -83,6 +118,24 @@ def parse_page(base_url: str, html: str, extract_rules=()) -> ParsedPage:
     if canonical:
         page.canonical_url = urljoin(base_url, canonical["href"].strip())
 
+    html_tag = soup.find("html")
+    if html_tag and (html_tag.has_attr("amp") or html_tag.has_attr("⚡")):
+        page.is_amp = True
+
+    for link_tag in soup.find_all("link", href=True):
+        rel = link_tag.get("rel") or []
+        if "alternate" in rel and link_tag.get("hreflang"):
+            page.hreflang.append((link_tag["hreflang"].strip(),
+                                  urljoin(base_url, link_tag["href"].strip())))
+        elif "amphtml" in rel:
+            page.amp_url = urljoin(base_url, link_tag["href"].strip())
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            page.schema_types.extend(_jsonld_types(json.loads(script.string or "")))
+        except (json.JSONDecodeError, TypeError):
+            page.schema_errors += 1
+
     page.h1_count = len(soup.find_all("h1"))
 
     images = soup.find_all("img")
@@ -111,6 +164,7 @@ def parse_page(base_url: str, html: str, extract_rules=()) -> ParsedPage:
     if words:
         normalized = " ".join(words).lower()
         page.content_hash = hashlib.md5(normalized.encode("utf-8")).hexdigest()
+        page.simhash = simhash64(normalized.split())
 
     # <base href> changes how relative links resolve.
     base_tag = soup.find("base", href=True)

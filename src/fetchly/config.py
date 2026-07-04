@@ -23,6 +23,10 @@ class CrawlConfig:
     exclude_patterns: list = field(default_factory=list)  # substrings to skip
     seed_urls: list = field(default_factory=list)  # extra URLs queued at depth 0 (URL-list audits)
     extract_rules: list = field(default_factory=list)  # "name=css:sel" / "name=re:pattern" specs
+    segment_rules: list = field(default_factory=list)  # "name=substring" / "name=re:pattern"; first match tags the page
+    robots_txt_file: str = ""     # local robots.txt override (test rules before deploying)
+    login_url: str = ""           # forms auth: POST target hit once before the crawl
+    login_data: dict = field(default_factory=dict)  # forms auth: form fields (never persisted)
 
     def validate(self) -> None:
         if not self.start_url.startswith(("http://", "https://")):

@@ -6,13 +6,24 @@ from urllib.robotparser import RobotFileParser
 
 
 class RobotsCache:
-    def __init__(self, user_agent: str, timeout: float = 10.0):
+    def __init__(self, user_agent: str, timeout: float = 10.0, override_text: str = ""):
+        """override_text: a local robots.txt applied to every host instead of
+        fetching — lets users test rule changes before deploying them."""
         self.user_agent = user_agent
         self.timeout = timeout
         self._parsers = {}
         self._lock = threading.Lock()
+        self._override = None
+        if override_text:
+            self._override = RobotFileParser()
+            self._override.parse(override_text.splitlines())
 
     def allowed(self, url: str) -> bool:
+        if self._override is not None:
+            try:
+                return self._override.can_fetch(self.user_agent, url)
+            except Exception:
+                return True
         parts = urlparse(url)
         origin = f"{parts.scheme}://{parts.netloc}"
         with self._lock:

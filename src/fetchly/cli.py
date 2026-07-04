@@ -41,6 +41,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--extract", action="append", default=[], metavar="RULE",
                    help="Custom extraction: name=css:selector or name=re:pattern "
                         "(repeatable; adds a CSV column per rule)")
+    p.add_argument("--segment", action="append", default=[], metavar="RULE",
+                   help="Tag pages: name=substring or name=re:pattern (repeatable; "
+                        "first match wins, adds a 'segment' CSV column)")
+    p.add_argument("--robots-file", metavar="FILE",
+                   help="Use a local robots.txt for every host instead of fetching "
+                        "(test rule changes before deploying)")
+    p.add_argument("--save", metavar="FILE", help="Save the full crawl to a .fetchly.json.gz")
+    p.add_argument("--open", dest="open_file", metavar="FILE",
+                   help="Reopen a saved crawl and re-export reports (no crawling)")
+    p.add_argument("--login-url", metavar="URL",
+                   help="Forms auth: POST this login URL once before crawling")
+    p.add_argument("--login-field", action="append", default=[], metavar="K=V",
+                   help="Forms auth form field (repeatable); use K=? to be prompted "
+                        "without echo")
     p.add_argument("-q", "--quiet", action="store_true")
     return p
 
@@ -48,6 +62,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.open_file:
+        return reexport(args)
+
+    login_data = {}
+    for field in args.login_field:
+        key, sep, value = field.partition("=")
+        if not sep or not key:
+            print(f"error: bad --login-field {field!r} (expected K=V)", file=sys.stderr)
+            return 2
+        if value == "?":
+            import getpass
+            value = getpass.getpass(f"{key}: ")
+        login_data[key] = value
 
     seed_urls = []
     if args.url_list:
@@ -86,6 +114,10 @@ def main(argv=None) -> int:
         check_orphans=not args.no_orphan_check,
         exclude_patterns=args.exclude,
         extract_rules=args.extract,
+        segment_rules=args.segment,
+        robots_txt_file=args.robots_file or "",
+        login_url=args.login_url or "",
+        login_data=login_data,
         render_js=args.render_js,
     )
 
@@ -95,6 +127,8 @@ def main(argv=None) -> int:
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    finally:
+        login_data.clear()  # drop credentials from memory once the session holds the cookies
 
     extract_names = [rule.split("=", 1)[0].strip() for rule in args.extract]
     report = CsvReport(args.output, extra_fields=extract_names)
@@ -138,6 +172,17 @@ def main(argv=None) -> int:
     issues_path = issues_path_for(args.output)
     write_issues(issues_path, issues)
 
+    if args.save:
+        from .session_io import save_crawl
+        save_crawl(args.save, config, results, issues)
+        print(f"Crawl saved: {args.save}")
+
+    if args.segment:
+        by_segment = {}
+        for r in results:
+            by_segment[r.segment or "(none)"] = by_segment.get(r.segment or "(none)", 0) + 1
+        print("Segments: " + ", ".join(f"{k}={v}" for k, v in sorted(by_segment.items())))
+
     if args.sitemap:
         count = write_sitemap(args.sitemap, results)
         print(f"Sitemap: {args.sitemap} ({count} indexable URLs)")
@@ -160,6 +205,30 @@ def main(argv=None) -> int:
         for issue_type, count in sorted(by_type.items(), key=lambda kv: -kv[1]):
             print(f"  {issue_type}: {count}")
     print(f"Reports: {args.output}, {issues_path}")
+    return 0
+
+
+def reexport(args) -> int:
+    """--open: rebuild reports from a saved crawl without recrawling."""
+    from .session_io import load_crawl
+    try:
+        config, results, issues = load_crawl(args.open_file)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"error: cannot open {args.open_file}: {exc}", file=sys.stderr)
+        return 2
+
+    extract_names = [rule.split("=", 1)[0].strip() for rule in config.extract_rules]
+    from .report import write_report
+    write_report(args.output, results, extra_fields=extract_names)
+    issues_path = issues_path_for(args.output)
+    write_issues(issues_path, issues)
+    if args.sitemap:
+        print(f"Sitemap: {args.sitemap} ({write_sitemap(args.sitemap, results)} URLs)")
+    if args.graph:
+        from .viz import write_graph
+        print(f"Graph: {args.graph} ({write_graph(args.graph, results)} nodes)")
+    print(f"Reopened crawl of {config.start_url}: {len(results)} pages, "
+          f"{len(issues)} issues.\nReports: {args.output}, {issues_path}")
     return 0
 
 

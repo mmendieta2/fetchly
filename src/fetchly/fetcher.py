@@ -20,6 +20,20 @@ class Fetcher:
             "User-Agent": config.user_agent,
             "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         })
+        if config.login_url:
+            self._login()
+
+    def _login(self) -> None:
+        """Forms auth: POST the login form once; cookies persist in the session."""
+        try:
+            response = self.session.post(
+                self.config.login_url, data=self.config.login_data,
+                timeout=self.config.timeout_seconds)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"login request to {self.config.login_url} failed: {exc}")
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"login to {self.config.login_url} returned HTTP {response.status_code}")
 
     def fetch(self, url: str, depth: int) -> "tuple[PageResult, str]":
         """Fetch with retries on transient failures; return (result, html_body).

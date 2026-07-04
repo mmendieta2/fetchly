@@ -1,5 +1,6 @@
 """Audit checks: turn crawl data into a list of actionable issues."""
 
+import re
 from dataclasses import dataclass
 
 from .frontier import normalize
@@ -15,6 +16,10 @@ _MAX_DETAIL_ITEMS = 5
 TITLE_MIN, TITLE_MAX = 30, 60
 META_DESC_MIN, META_DESC_MAX = 70, 155
 THIN_CONTENT_WORDS = 200
+NEAR_DUP_MAX_DISTANCE = 6   # max SimHash Hamming distance to flag
+_MAX_SITE_ISSUES_PER_TYPE = 20
+
+_HREFLANG_RE = re.compile(r"^[a-z]{2,3}(-[a-zA-Z]{2})?$")
 
 
 @dataclass
@@ -105,6 +110,22 @@ def audit_page(result: PageResult, parsed: "ParsedPage | None") -> "list[Issue]"
         if normalize(parsed.canonical_url) != normalize(final_url):
             issues.append(Issue(result.url, "canonical_mismatch", SEVERITY_WARNING,
                                 f"canonical points to {parsed.canonical_url}"))
+
+    if parsed.hreflang:
+        bad = [lang for lang, _ in parsed.hreflang
+               if lang.lower() != "x-default" and not _HREFLANG_RE.match(lang)]
+        if bad:
+            issues.append(Issue(result.url, "invalid_hreflang", SEVERITY_WARNING,
+                                "invalid language code(s): " + _summarize(bad)))
+        if not any(lang.lower() == "x-default" for lang, _ in parsed.hreflang):
+            issues.append(Issue(result.url, "hreflang_missing_x_default", SEVERITY_WARNING,
+                                f"{len(parsed.hreflang)} hreflang links but no x-default"))
+    if parsed.schema_errors:
+        issues.append(Issue(result.url, "invalid_json_ld", SEVERITY_ERROR,
+                            f"{parsed.schema_errors} JSON-LD block(s) failed to parse"))
+    if parsed.is_amp and not parsed.canonical_url:
+        issues.append(Issue(result.url, "amp_missing_canonical", SEVERITY_WARNING,
+                            "AMP page has no rel=canonical (required by the AMP spec)"))
     return issues
 
 
@@ -127,6 +148,56 @@ def find_duplicates(results: "list[PageResult]") -> "list[Issue]":
             if len(urls) > 1:
                 issues.append(Issue(urls[0], issue_type, SEVERITY_WARNING,
                                     f"same {label} on {len(urls)} pages: " + _summarize(urls)))
+    return issues
+
+
+def find_near_duplicates(results: "list[PageResult]") -> "list[Issue]":
+    """Pages whose SimHash fingerprints are within NEAR_DUP_MAX_DISTANCE bits.
+
+    O(n^2) pairwise compare — fine for crawls up to a few thousand pages.
+    Exact duplicates (same content_hash) are reported by find_duplicates
+    and skipped here.
+    """
+    pages = [r for r in results
+             if r.ok and not r.redirected_to and r.simhash and r.word_count]
+    issues = []
+    for i, a in enumerate(pages):
+        for b in pages[i + 1:]:
+            if a.content_hash == b.content_hash:
+                continue
+            distance = bin(a.simhash ^ b.simhash).count("1")
+            if distance <= NEAR_DUP_MAX_DISTANCE:
+                issues.append(Issue(a.url, "near_duplicate_content", SEVERITY_WARNING,
+                                    f"~{100 - distance * 100 // 64}% similar to {b.url} "
+                                    f"(SimHash distance {distance})"))
+                if len(issues) >= _MAX_SITE_ISSUES_PER_TYPE:
+                    return issues
+    return issues
+
+
+def find_hreflang_issues(results: "list[PageResult]") -> "list[Issue]":
+    """Cross-page hreflang checks: broken targets and missing return links."""
+    by_url = {normalize(r.redirected_to or r.url): r for r in results}
+    issues = []
+    for r in results:
+        if not r.hreflang:
+            continue
+        own_url = normalize(r.redirected_to or r.url)
+        for lang, target in r.hreflang:
+            target_norm = normalize(target)
+            other = by_url.get(target_norm)
+            if other is None or target_norm == own_url:
+                continue  # target not crawled (out of scope) or self-reference
+            if not other.ok:
+                issues.append(Issue(r.url, "hreflang_broken_target", SEVERITY_ERROR,
+                                    f"hreflang {lang} points to {target} "
+                                    f"(HTTP {other.status_code or 'error'})"))
+            elif other.hreflang and own_url not in {
+                    normalize(u) for _, u in other.hreflang}:
+                issues.append(Issue(r.url, "hreflang_missing_return_link", SEVERITY_WARNING,
+                                    f"{target} does not link back via hreflang"))
+            if len(issues) >= _MAX_SITE_ISSUES_PER_TYPE:
+                return issues
     return issues
 
 

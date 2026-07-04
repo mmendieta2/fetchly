@@ -30,15 +30,25 @@ class PageResult:
     images_missing_alt: int = 0
     word_count: int = 0
     content_hash: str = ""
+    simhash: int = 0             # 64-bit near-duplicate fingerprint
+    segment: str = ""            # first matching segment rule name
+    hreflang_count: int = 0
+    hreflang: list = field(default_factory=list)  # (lang, url) pairs; not a CSV column
+    schema_types: str = ""       # "|"-joined JSON-LD @type values
+    schema_errors: int = 0       # unparseable JSON-LD blocks
+    amp_url: str = ""            # <link rel="amphtml"> target
+    is_amp: bool = False         # <html amp> / <html ⚡> page
     extracted: dict = field(default_factory=dict)  # custom-extraction values, extra CSV columns
 
     CSV_FIELDS = (
-        "url", "status_code", "ok", "depth", "found_on", "content_type",
-        "content_length", "title", "meta_description", "canonical_url",
-        "meta_robots", "x_robots_tag", "h1_count", "word_count",
-        "content_hash", "elapsed_ms", "redirected_to", "redirect_hops",
-        "redirect_type", "links_found", "internal_links", "external_links",
-        "image_count", "images_missing_alt", "error",
+        "url", "status_code", "ok", "depth", "found_on", "segment",
+        "content_type", "content_length", "title", "meta_description",
+        "canonical_url", "meta_robots", "x_robots_tag", "h1_count",
+        "word_count", "content_hash", "simhash", "hreflang_count",
+        "schema_types", "schema_errors", "amp_url", "is_amp", "elapsed_ms",
+        "redirected_to", "redirect_hops", "redirect_type", "links_found",
+        "internal_links", "external_links", "image_count",
+        "images_missing_alt", "error",
     )
 
     def as_row(self) -> dict:
