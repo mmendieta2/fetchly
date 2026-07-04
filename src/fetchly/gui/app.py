@@ -7,6 +7,7 @@ Tk's after() so every widget update happens on the main thread.
 """
 
 import queue
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -34,6 +35,7 @@ class FetchlyApp(ttk.Frame):
         self._build_form()
         self._build_table()
         self._build_statusbar()
+        self._install_context_menus()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # -- layout -------------------------------------------------------------
@@ -158,6 +160,88 @@ class FetchlyApp(ttk.Frame):
         self.issues_tree = self._make_tree(issues_tab, {
             "severity": ("Severity", 80, False), "type": ("Type", 170, False),
             "page": ("Page", 340, True), "detail": ("Detail", 340, True)})
+
+    def _install_context_menus(self) -> None:
+        """Right-click menus: edit actions on entries, copy actions on tables."""
+        button = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+
+        self._entry_target = None
+        self._entry_menu = tk.Menu(self.root, tearoff=0)
+        self._entry_menu.add_command(label="Cut", command=lambda: self._entry_event("<<Cut>>"))
+        self._entry_menu.add_command(label="Copy", command=lambda: self._entry_event("<<Copy>>"))
+        self._entry_menu.add_command(label="Paste", command=lambda: self._entry_event("<<Paste>>"))
+        self._entry_menu.add_separator()
+        self._entry_menu.add_command(label="Select All", command=self._entry_select_all)
+        self.root.bind_class("TEntry", button, self._popup_entry_menu)
+
+        self._tree_target = None
+        self._tree_menu = tk.Menu(self.root, tearoff=0)
+        self._tree_menu.add_command(label="Copy Cell", command=self._copy_cell)
+        self._tree_menu.add_command(label="Copy Row", command=self._copy_row)
+        self._tree_menu.add_command(label="Copy URL", command=self._copy_url)
+        for tree in (self.tree, self.issues_tree):
+            tree.bind(button, self._popup_tree_menu)
+
+    def _popup_entry_menu(self, event) -> None:
+        self._entry_target = event.widget
+        event.widget.focus_set()
+        try:
+            self._entry_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._entry_menu.grab_release()
+
+    def _entry_event(self, virtual_event: str) -> None:
+        if self._entry_target is not None:
+            self._entry_target.event_generate(virtual_event)
+
+    def _entry_select_all(self) -> None:
+        if self._entry_target is not None:
+            self._entry_target.select_range(0, "end")
+            self._entry_target.icursor("end")
+
+    def _popup_tree_menu(self, event) -> None:
+        tree = event.widget
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        tree.focus(row)
+        column = tree.identify_column(event.x)
+        self._tree_target = (tree, row, column)
+        try:
+            self._tree_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._tree_menu.grab_release()
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.status_var.set(f"Copied: {text[:80]}" + ("…" if len(text) > 80 else ""))
+
+    def _copy_cell(self) -> None:
+        if self._tree_target is None:
+            return
+        tree, row, column = self._tree_target
+        values = tree.item(row, "values")
+        index = max(0, int(column.lstrip("#") or 1) - 1)
+        if index < len(values):
+            self._copy_to_clipboard(str(values[index]))
+
+    def _copy_row(self) -> None:
+        if self._tree_target is None:
+            return
+        tree, row, _ = self._tree_target
+        self._copy_to_clipboard("\t".join(str(v) for v in tree.item(row, "values")))
+
+    def _copy_url(self) -> None:
+        if self._tree_target is None:
+            return
+        tree, row, _ = self._tree_target
+        columns = tree["columns"]
+        for name in ("url", "page"):  # pages tab uses "url", issues tab "page"
+            if name in columns:
+                self._copy_to_clipboard(str(tree.item(row, "values")[columns.index(name)]))
+                return
 
     def _build_statusbar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
