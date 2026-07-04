@@ -22,14 +22,46 @@ from .models import PageResult
 _INSTALL_HINT = ('JavaScript rendering requires Playwright: '
                  'pip install "fetchly[js]" && playwright install chromium')
 
+# In-page mobile usability probe: viewport meta, small text, small tap targets.
+# Sampling is capped so huge pages stay fast.
+_MOBILE_JS = """() => {
+  const out = {viewport: !!document.querySelector('meta[name="viewport"]'),
+               small_text: 0, small_taps: 0};
+  const els = document.querySelectorAll('p,span,li,td,a,button,label');
+  let checked = 0;
+  for (const el of els) {
+    if (checked++ > 300) break;
+    const style = getComputedStyle(el);
+    if (el.innerText && el.innerText.trim() && parseFloat(style.fontSize) < 12)
+      out.small_text++;
+  }
+  const taps = document.querySelectorAll('a,button,input,select,[onclick]');
+  checked = 0;
+  for (const el of taps) {
+    if (checked++ > 300) break;
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && (r.width < 48 || r.height < 48))
+      out.small_taps++;
+  }
+  return out;
+}"""
+
+_A11Y_JS = """() => axe.run(document, {resultTypes: ['violations']})
+  .then(r => r.violations.map(v => ({id: v.id, impact: v.impact,
+    description: v.description, nodes: v.nodes.length})))"""
+
 
 class JsFetcher:
-    def __init__(self, config: CrawlConfig):
+    def __init__(self, config: CrawlConfig, snippets=None, axe_source: str = ""):
+        """snippets: {name: js_code} run per page into result.extracted;
+        axe_source: axe-core JS injected when config.a11y_checks."""
         try:
             import playwright  # noqa: F401
         except ImportError:
             raise RuntimeError(_INSTALL_HINT)
         self.config = config
+        self._snippets = snippets or {}
+        self._axe_source = axe_source
         # Plain HTTP session for non-rendered fetches (robots.txt, sitemap.xml).
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": config.user_agent})
@@ -62,7 +94,12 @@ class JsFetcher:
             from playwright.sync_api import sync_playwright
             pw = sync_playwright().start()
             browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(user_agent=self.config.user_agent)
+            context_args = {"user_agent": self.config.user_agent}
+            if self.config.mobile_checks:
+                context_args.update(viewport={"width": 390, "height": 844},
+                                    device_scale_factor=3, is_mobile=True,
+                                    has_touch=True)
+            context = browser.new_context(**context_args)
         except Exception as exc:
             self._init_error = exc
             self._ready.set()
@@ -114,10 +151,33 @@ class JsFetcher:
             body = page.content()
             result.content_length = len(body.encode("utf-8", errors="replace"))
             is_html = result.content_type in ("text/html", "application/xhtml+xml", "")
-            return result, (body if is_html and response.ok else "")
+            if is_html and response.ok:
+                self._run_page_checks(page, result)
+                return result, body
+            return result, ""
         except Exception as exc:
             result.error = f"{type(exc).__name__}: {exc}"
             return result, ""
         finally:
             page.close()
             result.elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+
+    def _run_page_checks(self, page, result: PageResult) -> None:
+        """Optional in-browser audits; failures degrade to notes, never crash."""
+        for name, code in self._snippets.items():
+            try:
+                value = page.evaluate(code)
+                result.extracted[name] = str(value)[:500] if value is not None else ""
+            except Exception as exc:
+                result.extracted[name] = f"(snippet error: {exc})"[:200]
+        if self.config.mobile_checks:
+            try:
+                result.browser_checks["mobile"] = page.evaluate(_MOBILE_JS)
+            except Exception:
+                pass
+        if self.config.a11y_checks and self._axe_source:
+            try:
+                page.add_script_tag(content=self._axe_source)
+                result.browser_checks["a11y"] = page.evaluate(_A11Y_JS)
+            except Exception:
+                pass

@@ -81,6 +81,28 @@ class ParsedPage:
     amp_url: str = ""           # <link rel="amphtml"> target, absolute
     is_amp: bool = False        # <html amp> / <html ⚡>
     extracted: dict = field(default_factory=dict)  # rule name -> " | "-joined matches
+    misspellings: "list[str]" = field(default_factory=list)  # unknown words (spellcheck)
+
+
+_MAX_MISSPELLINGS = 10
+_WORD_EDGE = re.compile(r"^[^\w]+|[^\w]+$")
+
+
+def find_misspellings(words: "list[str]", dictionary: "set[str]") -> "list[str]":
+    """Conservative spellcheck: only plain lowercase ASCII words are judged,
+    so names, acronyms, code, and non-English text don't false-positive."""
+    unknown, seen = [], set()
+    for raw in words:
+        word = _WORD_EDGE.sub("", raw)
+        if (len(word) < 4 or not word.isascii() or not word.isalpha()
+                or word != word.lower() or word in seen):
+            continue
+        seen.add(word)
+        if word not in dictionary:
+            unknown.append(word)
+            if len(unknown) >= _MAX_MISSPELLINGS:
+                break
+    return unknown
 
 
 # Tags whose fetched resources cause mixed-content warnings on https pages.
@@ -91,7 +113,7 @@ _RESOURCE_TAGS = (
 )
 
 
-def parse_page(base_url: str, html: str, extract_rules=()) -> ParsedPage:
+def parse_page(base_url: str, html: str, extract_rules=(), spell_dictionary=None) -> ParsedPage:
     soup = BeautifulSoup(html, "html.parser")
     page = ParsedPage()
 
@@ -165,6 +187,8 @@ def parse_page(base_url: str, html: str, extract_rules=()) -> ParsedPage:
         normalized = " ".join(words).lower()
         page.content_hash = hashlib.md5(normalized.encode("utf-8")).hexdigest()
         page.simhash = simhash64(normalized.split())
+        if spell_dictionary is not None:
+            page.misspellings = find_misspellings(words, spell_dictionary)
 
     # <base href> changes how relative links resolve.
     base_tag = soup.find("base", href=True)

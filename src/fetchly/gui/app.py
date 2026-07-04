@@ -107,6 +107,15 @@ class FetchlyApp(ttk.Frame):
         self.subdomains_var = tk.BooleanVar(value=False)
         self.robots_var = tk.BooleanVar(value=True)
         self.render_js_var = tk.BooleanVar(value=False)
+        self.mobile_var = tk.BooleanVar(value=False)
+        self.a11y_var = tk.BooleanVar(value=False)
+        self.spellcheck_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(form, text="Mobile usability", variable=self.mobile_var).grid(
+            row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(form, text="Accessibility (axe)", variable=self.a11y_var).grid(
+            row=10, column=2, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(form, text="Spellcheck", variable=self.spellcheck_var).grid(
+            row=10, column=4, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Checkbutton(form, text="Include subdomains", variable=self.subdomains_var).grid(
             row=2, column=2, columnspan=2, sticky="w")
         ttk.Checkbutton(form, text="Respect robots.txt", variable=self.robots_var).grid(
@@ -313,6 +322,9 @@ class FetchlyApp(ttk.Frame):
             include_subdomains=self.subdomains_var.get(),
             respect_robots=self.robots_var.get(),
             render_js=self.render_js_var.get(),
+            mobile_checks=self.mobile_var.get(),
+            a11y_checks=self.a11y_var.get(),
+            spellcheck=self.spellcheck_var.get(),
         )
 
     def _start(self) -> None:

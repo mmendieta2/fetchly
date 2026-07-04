@@ -39,6 +39,9 @@ class PageResult:
     amp_url: str = ""            # <link rel="amphtml"> target
     is_amp: bool = False         # <html amp> / <html ⚡> page
     extracted: dict = field(default_factory=dict)  # custom-extraction values, extra CSV columns
+    browser_checks: dict = field(default_factory=dict)  # mobile/a11y results from JS mode
+    misspellings: str = ""       # sample of unknown words (spellcheck)
+    misspell_count: int = 0
 
     CSV_FIELDS = (
         "url", "status_code", "ok", "depth", "found_on", "segment",
@@ -48,7 +51,7 @@ class PageResult:
         "schema_types", "schema_errors", "amp_url", "is_amp", "elapsed_ms",
         "redirected_to", "redirect_hops", "redirect_type", "links_found",
         "internal_links", "external_links", "image_count",
-        "images_missing_alt", "error",
+        "images_missing_alt", "misspell_count", "misspellings", "error",
     )
 
     def as_row(self) -> dict:

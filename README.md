@@ -103,6 +103,10 @@ python -m fetchly.gui.app
 | `--segment RULE` | tag pages: `name=substring` or `name=re:pattern` (repeatable; adds a `segment` column) | — |
 | `--robots-file FILE` | use a local robots.txt for every host (test rules pre-deploy) | — |
 | `--save FILE` / `--open FILE` | save the crawl to `.fetchly.json.gz` / reopen and re-export without recrawling | — |
+| `--mobile` | mobile usability audit: phone viewport, flags missing viewport meta / tiny text / small tap targets (needs `--render-js`) | off |
+| `--a11y` | accessibility audit via bundled axe-core (needs `--render-js`) | off |
+| `--js-snippet NAME=FILE` | run a JS file in each rendered page; return value becomes a CSV column (repeatable; needs `--render-js`) | — |
+| `--spellcheck` + `--dictionary FILE` | flag likely misspellings in visible text (dictionary defaults to /usr/share/dict/words) | off |
 | `--login-url URL` + `--login-field K=V` | forms auth: POST once before crawling (use `K=?` to be prompted without echo; not available with `--render-js`; credentials are never saved) | — |
 
 `--url-list` is for site migrations: it fetches exactly the listed URLs
@@ -153,6 +157,9 @@ the same list in the GUI's **Issues** tab. Checks:
 | `hreflang_missing_return_link` | warning | alternate page doesn't link back |
 | `invalid_json_ld` | error | structured-data block fails to parse |
 | `amp_missing_canonical` | warning | AMP page without required rel=canonical |
+| `missing_viewport_meta` / `small_text_mobile` / `small_tap_targets` | warning | mobile usability (`--mobile`) |
+| `a11y_<rule>` | error/warning | axe-core violation (`--a11y`); critical/serious → error |
+| `possible_misspellings` | warning | words not in the dictionary (`--spellcheck`) |
 
 The orphan check fetches `/sitemap.xml` (sitemap indexes supported) after the
 crawl finishes; it is skipped when the crawl was truncated by the page limit

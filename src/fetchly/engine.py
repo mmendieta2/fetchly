@@ -5,6 +5,7 @@ drain `engine.events` (a queue.Queue of objects from fetchly.events).
 stop() requests a graceful shutdown; workers finish their current page.
 """
 
+import os
 import queue
 import threading
 import time
@@ -31,13 +32,23 @@ class CrawlEngine:
 
         self._work: "queue.Queue" = queue.Queue()   # (url, depth, found_on)
         self._frontier = Frontier(config)
+
+        for flag, name in ((config.mobile_checks, "mobile usability checks"),
+                           (config.a11y_checks, "accessibility checks"),
+                           (config.js_snippets, "custom JS snippets")):
+            if flag and not config.render_js:
+                raise ValueError(f"{name} require JS rendering (--render-js)")
+
         if config.render_js:
             if config.login_url:
                 raise ValueError("forms authentication is not yet supported with JS rendering")
             from .jsfetch import JsFetcher  # deferred: optional playwright dependency
-            self._fetcher = JsFetcher(config)
+            self._fetcher = JsFetcher(config, snippets=self._load_snippets(config),
+                                      axe_source=self._load_axe(config))
         else:
             self._fetcher = Fetcher(config)
+
+        self._spell_dictionary = self._load_dictionary(config)
 
         robots_override = ""
         if config.robots_txt_file:
@@ -60,6 +71,44 @@ class CrawlEngine:
         self._in_flight = 0
         self._state_lock = threading.Lock()
         self._threads: "list[threading.Thread]" = []
+
+    @staticmethod
+    def _load_snippets(config) -> dict:
+        snippets = {}
+        for spec in config.js_snippets:
+            name, sep, path = spec.partition("=")
+            if not sep or not name.strip() or not path:
+                raise ValueError(f"bad JS snippet {spec!r} (expected name=path.js)")
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    snippets[name.strip()] = fh.read()
+            except OSError as exc:
+                raise ValueError(f"cannot read JS snippet: {exc}")
+        return snippets
+
+    @staticmethod
+    def _load_axe(config) -> str:
+        if not config.a11y_checks:
+            return ""
+        path = os.path.join(os.path.dirname(__file__), "vendor", "axe.min.js")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read()
+        except OSError as exc:
+            raise ValueError(f"axe-core not found ({exc}); reinstall fetchly")
+
+    @staticmethod
+    def _load_dictionary(config):
+        if not config.spellcheck:
+            return None
+        path = config.dictionary_file or "/usr/share/dict/words"
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                return {line.strip().lower() for line in fh if line.strip()}
+        except OSError as exc:
+            raise ValueError(
+                f"spellcheck needs a word list: {exc} "
+                "(pass --dictionary FILE or install a system dictionary)")
 
     @staticmethod
     def _parse_segment_rules(specs):
@@ -162,7 +211,8 @@ class CrawlEngine:
         parsed = None
         if body:
             base = result.redirected_to or url
-            parsed = parse_page(base, body, self._extract_rules)
+            parsed = parse_page(base, body, self._extract_rules,
+                                spell_dictionary=self._spell_dictionary)
             self._apply_parsed(result, parsed)
             if depth < self.config.max_depth and not self._stop.is_set():
                 for link in parsed.links:
@@ -200,7 +250,9 @@ class CrawlEngine:
         result.schema_errors = parsed.schema_errors
         result.amp_url = parsed.amp_url
         result.is_amp = parsed.is_amp
-        result.extracted = parsed.extracted
+        result.extracted.update(parsed.extracted)
+        result.misspellings = ", ".join(parsed.misspellings)
+        result.misspell_count = len(parsed.misspellings)
         for link in parsed.links:
             if self._frontier.same_site(link):
                 result.internal_links += 1

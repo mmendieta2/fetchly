@@ -31,6 +31,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--subdomains", action="store_true", help="Also crawl subdomains")
     p.add_argument("--all-domains", action="store_true", help="Do not restrict to the start domain")
     p.add_argument("--no-robots", action="store_true", help="Ignore robots.txt")
+    p.add_argument("--mobile", action="store_true",
+                   help="Mobile usability audit: crawl with a phone viewport and flag "
+                        "missing viewport meta, tiny text, small tap targets (needs --render-js)")
+    p.add_argument("--a11y", action="store_true",
+                   help="Accessibility audit via bundled axe-core (needs --render-js)")
+    p.add_argument("--js-snippet", action="append", default=[], metavar="NAME=FILE",
+                   help="Run a JS file in each rendered page; return value becomes a "
+                        "CSV column (repeatable; needs --render-js)")
+    p.add_argument("--spellcheck", action="store_true",
+                   help="Flag likely misspellings in visible text")
+    p.add_argument("--dictionary", metavar="FILE",
+                   help="Word list for --spellcheck (default: /usr/share/dict/words)")
     p.add_argument("--render-js", action="store_true",
                    help="Render pages with headless Chromium "
                         "(needs: pip install \"fetchly[js]\" && playwright install chromium)")
@@ -122,6 +134,11 @@ def main(argv=None) -> int:
         login_url=args.login_url or "",
         login_data=login_data,
         render_js=args.render_js,
+        mobile_checks=args.mobile,
+        a11y_checks=args.a11y,
+        js_snippets=args.js_snippet,
+        spellcheck=args.spellcheck,
+        dictionary_file=args.dictionary or "",
     )
 
     try:
@@ -134,6 +151,7 @@ def main(argv=None) -> int:
         login_data.clear()  # drop credentials from memory once the session holds the cookies
 
     extract_names = [rule.split("=", 1)[0].strip() for rule in args.extract]
+    extract_names += [rule.split("=", 1)[0].strip() for rule in args.js_snippet]
     report = CsvReport(args.output, extra_fields=extract_names)
     issues = []
     results = []

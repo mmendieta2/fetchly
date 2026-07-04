@@ -131,6 +131,30 @@ def audit_page(result: PageResult, parsed: "ParsedPage | None") -> "list[Issue]"
     if parsed.is_amp and not parsed.canonical_url:
         issues.append(Issue(result.url, "amp_missing_canonical", SEVERITY_WARNING,
                             "AMP page has no rel=canonical (required by the AMP spec)"))
+    if parsed.misspellings:
+        issues.append(Issue(result.url, "possible_misspellings", SEVERITY_WARNING,
+                            f"{len(parsed.misspellings)} unknown word(s): "
+                            + _summarize(parsed.misspellings)))
+
+    mobile = result.browser_checks.get("mobile")
+    if mobile:
+        if not mobile.get("viewport"):
+            issues.append(Issue(result.url, "missing_viewport_meta", SEVERITY_WARNING,
+                                "no <meta name=viewport> — page won't scale on mobile"))
+        if mobile.get("small_text"):
+            issues.append(Issue(result.url, "small_text_mobile", SEVERITY_WARNING,
+                                f"{mobile['small_text']} element(s) with font-size < 12px"))
+        if mobile.get("small_taps"):
+            issues.append(Issue(result.url, "small_tap_targets", SEVERITY_WARNING,
+                                f"{mobile['small_taps']} tap target(s) smaller than 48x48px"))
+
+    for violation in (result.browser_checks.get("a11y") or [])[:10]:
+        severity = (SEVERITY_ERROR if violation.get("impact") in ("critical", "serious")
+                    else SEVERITY_WARNING)
+        issues.append(Issue(result.url, f"a11y_{violation.get('id', 'unknown')}", severity,
+                            f"{violation.get('description', '')} "
+                            f"({violation.get('nodes', 0)} element(s), "
+                            f"impact: {violation.get('impact', '-')})"))
     return issues
 
 

@@ -27,6 +27,11 @@ class CrawlConfig:
     robots_txt_file: str = ""     # local robots.txt override (test rules before deploying)
     login_url: str = ""           # forms auth: POST target hit once before the crawl
     login_data: dict = field(default_factory=dict)  # forms auth: form fields (never persisted)
+    mobile_checks: bool = False   # JS mode: mobile viewport + usability audits
+    a11y_checks: bool = False     # JS mode: axe-core accessibility audits
+    js_snippets: list = field(default_factory=list)  # "name=path.js" run per page (JS mode)
+    spellcheck: bool = False      # flag likely misspellings in visible text
+    dictionary_file: str = ""     # word list for spellcheck (default: /usr/share/dict/words)
 
     def validate(self) -> None:
         if not self.start_url.startswith(("http://", "https://")):

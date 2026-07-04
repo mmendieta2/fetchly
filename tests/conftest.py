@@ -18,6 +18,9 @@ SITE = {
     "robots.txt": "User-agent: *\nDisallow: /private/\n",
     "private/secret.html": "<html><head><title>Secret</title></head><body></body></html>",
     "orphan.html": "<html><head><title>Orphan</title></head><body>unlinked</body></html>",
+    # Unlinked page with clear axe violations (image without alt, no lang attr).
+    "a11y.html": """<html><head><title>A11y</title></head><body>
+        <img src="pic.png"><p>text</p></body></html>""",
     # Content injected client-side; used by the optional JS-rendering tests.
     # The marker is concatenated at runtime so it never appears in the raw source.
     "jspage.html": """<html><head><title>JS</title></head><body><div id="app"></div>
