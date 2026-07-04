@@ -99,6 +99,10 @@ python -m fetchly.gui.app
 | `--graph FILE` | self-contained HTML link-graph visualization | — |
 | `--extract RULE` | custom extraction: `name=css:selector` or `name=re:pattern` (repeatable; each rule adds a CSV column) | — |
 | `--render-js` | render pages with headless Chromium (see below) | off |
+| `--segment RULE` | tag pages: `name=substring` or `name=re:pattern` (repeatable; adds a `segment` column) | — |
+| `--robots-file FILE` | use a local robots.txt for every host (test rules pre-deploy) | — |
+| `--save FILE` / `--open FILE` | save the crawl to `.fetchly.json.gz` / reopen and re-export without recrawling | — |
+| `--login-url URL` + `--login-field K=V` | forms auth: POST once before crawling (use `K=?` to be prompted without echo; not available with `--render-js`; credentials are never saved) | — |
 
 `--url-list` is for site migrations: it fetches exactly the listed URLs
 (depth 0, any domain) and reports status/redirect/audit data for each. The
@@ -140,6 +144,12 @@ the same list in the GUI's **Issues** tab. Checks:
 | `duplicate_title` / `duplicate_meta_description` | warning | same value on 2+ pages |
 | `duplicate_content` | warning | identical visible text (md5) on 2+ pages |
 | `orphan_page` | warning | listed in `sitemap.xml` but not linked from any crawled page |
+| `near_duplicate_content` | warning | visible text ≥ ~90% similar to another page (SimHash) |
+| `invalid_hreflang` / `hreflang_missing_x_default` | warning | bad language code / no x-default alternate |
+| `hreflang_broken_target` | error | hreflang points at a 4xx/5xx page |
+| `hreflang_missing_return_link` | warning | alternate page doesn't link back |
+| `invalid_json_ld` | error | structured-data block fails to parse |
+| `amp_missing_canonical` | warning | AMP page without required rel=canonical |
 
 The orphan check fetches `/sitemap.xml` (sitemap indexes supported) after the
 crawl finishes; it is skipped when the crawl was truncated by the page limit
