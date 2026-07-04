@@ -71,8 +71,14 @@ python -m fetchly.gui.app
 
 ## CSV report columns
 
-`url, status_code, ok, depth, content_type, content_length, title, elapsed_ms,
-redirected_to, links_found, error`
+`url, status_code, ok, depth, found_on, content_type, content_length, title,
+meta_description, canonical_url, h1_count, word_count, elapsed_ms,
+redirected_to, links_found, internal_links, external_links, image_count,
+images_missing_alt, error`
+
+`found_on` is the page where the URL was discovered — for a 404 row it tells
+you which page holds the broken link. Internal/external link counts treat the
+start domain and all its subdomains as internal.
 
 ## Platform notes
 

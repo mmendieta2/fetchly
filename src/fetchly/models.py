@@ -16,11 +16,22 @@ class PageResult:
     redirected_to: str = ""
     links_found: int = 0
     error: str = ""
+    found_on: str = ""  # page where this URL was discovered
+    meta_description: str = ""
+    canonical_url: str = ""
+    h1_count: int = 0
+    internal_links: int = 0
+    external_links: int = 0
+    image_count: int = 0
+    images_missing_alt: int = 0
+    word_count: int = 0
 
     CSV_FIELDS = (
-        "url", "status_code", "ok", "depth", "content_type",
-        "content_length", "title", "elapsed_ms", "redirected_to",
-        "links_found", "error",
+        "url", "status_code", "ok", "depth", "found_on", "content_type",
+        "content_length", "title", "meta_description", "canonical_url",
+        "h1_count", "word_count", "elapsed_ms", "redirected_to",
+        "links_found", "internal_links", "external_links",
+        "image_count", "images_missing_alt", "error",
     )
 
     def as_row(self) -> dict:

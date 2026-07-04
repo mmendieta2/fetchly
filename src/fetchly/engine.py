@@ -24,7 +24,7 @@ class CrawlEngine:
         self.config = config
         self.events: "queue.Queue" = queue.Queue()
 
-        self._work: "queue.Queue" = queue.Queue()   # (url, depth)
+        self._work: "queue.Queue" = queue.Queue()   # (url, depth, found_on)
         self._frontier = Frontier(config)
         self._fetcher = Fetcher(config)
         self._robots = RobotsCache(config.user_agent) if config.respect_robots else None
@@ -42,7 +42,7 @@ class CrawlEngine:
         start_url = self._frontier.admit(self.config.start_url)
         if not start_url:
             raise ValueError(f"Start URL is out of scope: {self.config.start_url}")
-        self._work.put((start_url, 0))
+        self._work.put((start_url, 0, ""))
         self.events.put(events.CrawlStarted(start_url=start_url))
         for i in range(self.config.num_workers):
             t = threading.Thread(target=self._worker, name=f"fetchly-{i}", daemon=True)
@@ -69,7 +69,7 @@ class CrawlEngine:
     def _worker(self) -> None:
         while not self._stop.is_set():
             try:
-                url, depth = self._work.get(timeout=0.25)
+                url, depth, found_on = self._work.get(timeout=0.25)
             except queue.Empty:
                 with self._state_lock:
                     if self._in_flight == 0 and self._work.empty():
@@ -79,13 +79,13 @@ class CrawlEngine:
             with self._state_lock:
                 self._in_flight += 1
             try:
-                self._process(url, depth)
+                self._process(url, depth, found_on)
             finally:
                 with self._state_lock:
                     self._in_flight -= 1
                 self._work.task_done()
 
-    def _process(self, url: str, depth: int) -> None:
+    def _process(self, url: str, depth: int, found_on: str) -> None:
         if not self._claim_page_slot():
             self._stop.set()
             return
@@ -100,26 +100,38 @@ class CrawlEngine:
             time.sleep(self.config.delay_seconds)
 
         result, body = self._fetcher.fetch(url, depth)
+        result.found_on = found_on
 
-        if body and depth < self.config.max_depth and not self._stop.is_set():
+        if body:
             base = result.redirected_to or url
-            title, links = parse_page(base, body)
-            result.title = title
-            result.links_found = len(links)
-            for link in links:
-                admitted = self._frontier.admit(link)
-                if admitted:
-                    self._work.put((admitted, depth + 1))
-        elif body:
-            title, links = parse_page(url, body)
-            result.title = title
-            result.links_found = len(links)
+            parsed = parse_page(base, body)
+            self._apply_parsed(result, parsed)
+            if depth < self.config.max_depth and not self._stop.is_set():
+                for link in parsed.links:
+                    admitted = self._frontier.admit(link)
+                    if admitted:
+                        self._work.put((admitted, depth + 1, url))
 
         with self._stats_lock:
             self._stats.record(result)
             self._stats.queued = self._work.qsize()
             snapshot = CrawlStats(**vars(self._stats))
         self.events.put(events.PageCrawled(result=result, stats=snapshot))
+
+    def _apply_parsed(self, result, parsed) -> None:
+        result.title = parsed.title
+        result.links_found = len(parsed.links)
+        result.meta_description = parsed.meta_description
+        result.canonical_url = parsed.canonical_url
+        result.h1_count = parsed.h1_count
+        result.image_count = parsed.image_count
+        result.images_missing_alt = parsed.images_missing_alt
+        result.word_count = parsed.word_count
+        for link in parsed.links:
+            if self._frontier.same_site(link):
+                result.internal_links += 1
+            else:
+                result.external_links += 1
 
     def _supervisor(self) -> None:
         for t in self._threads:

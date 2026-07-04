@@ -58,6 +58,15 @@ class Frontier:
                 return False
         return True
 
+    def same_site(self, url: str) -> bool:
+        """True if the URL is on the start domain or one of its subdomains.
+
+        Used for internal/external link classification in reports; unlike
+        in_scope() it ignores the crawl's subdomain setting.
+        """
+        host = urlparse(url).netloc.lower().split(":")[0]
+        return host == self._root_host or host.endswith("." + self._root_host)
+
     def admit(self, url: str) -> str:
         """Return the normalized URL if new and in scope, else empty string."""
         norm = normalize(url)

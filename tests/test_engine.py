@@ -44,6 +44,28 @@ def test_full_crawl(test_site):
     assert by_url[test_site + "missing.html"].status_code == 404
 
 
+def test_found_on_referrer(test_site):
+    """Each crawled page records the page that linked to it."""
+    config = CrawlConfig(start_url=test_site, num_workers=1)
+    results, _, _ = run_crawl(config)
+    by_url = {r.url: r for r in results}
+    assert by_url[test_site].found_on == ""
+    assert by_url[test_site + "missing.html"].found_on == test_site
+    assert by_url[test_site + "page3.html"].found_on == test_site + "page1.html"
+
+
+def test_audit_columns_populated(test_site):
+    config = CrawlConfig(start_url=test_site)
+    results, _, _ = run_crawl(config)
+    home = {r.url: r for r in results}[test_site]
+    # index links: page1, page2, missing, pic.png (same host) + mailto (no host)
+    assert home.links_found == 5
+    assert home.internal_links == 4
+    assert home.external_links == 1
+    assert home.h1_count == 0
+    assert home.word_count > 0
+
+
 def test_robots_disallow(test_site):
     """A directly-seeded disallowed URL is skipped with reason robots.txt."""
     config = CrawlConfig(start_url=test_site + "private/secret.html")

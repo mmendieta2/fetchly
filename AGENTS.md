@@ -21,13 +21,13 @@ whether to read a file or trust this summary.
 | File | Lines | Responsibility | Key API |
 |---|---|---|---|
 | `config.py` | ~35 | All crawl settings in one dataclass | `CrawlConfig(start_url, max_pages, max_depth, num_workers, delay_seconds, timeout_seconds, same_domain_only, include_subdomains, respect_robots, follow_redirects, user_agent, exclude_patterns)`, `.validate()` |
-| `models.py` | ~55 | Result/stat dataclasses | `PageResult` (url, status_code, ok, depth, content_type, content_length, title, elapsed_ms, redirected_to, links_found, error; `CSV_FIELDS`, `.as_row()`), `CrawlStats` (crawled, queued, errors, skipped, bytes_downloaded, status_counts; `.record(result)`) |
+| `models.py` | ~70 | Result/stat dataclasses | `PageResult` (url, status_code, ok, depth, found_on, content_type, content_length, title, meta_description, canonical_url, h1_count, internal_links, external_links, image_count, images_missing_alt, word_count, elapsed_ms, redirected_to, links_found, error; `CSV_FIELDS`, `.as_row()`), `CrawlStats` (crawled, queued, errors, skipped, bytes_downloaded, status_counts; `.record(result)`) |
 | `events.py` | ~40 | Engine→UI event dataclasses | `CrawlStarted(start_url)`, `PageCrawled(result, stats)`, `UrlSkipped(url, reason)`, `CrawlFinished(stats, stopped_by_user, fatal_error)` |
-| `frontier.py` | ~75 | URL normalization, dedupe, scope policy | `normalize(url)`, `Frontier(config)`: `.admit(url) -> str` (normalized URL if new+in-scope, else `""`), `.in_scope(url)`. Skips binary extensions, non-http schemes, excluded substrings |
+| `frontier.py` | ~85 | URL normalization, dedupe, scope policy | `normalize(url)`, `Frontier(config)`: `.admit(url) -> str` (normalized URL if new+in-scope, else `""`), `.in_scope(url)`, `.same_site(url)` (internal/external classification, subdomains always internal). Skips binary extensions, non-http schemes, excluded substrings |
 | `robots.py` | ~35 | Per-host robots.txt cache (stdlib parser), fails open | `RobotsCache(user_agent).allowed(url) -> bool` |
 | `fetcher.py` | ~60 | HTTP layer: shared requests.Session, timing, 5 MiB body cap | `Fetcher(config).fetch(url, depth) -> (PageResult, html_body)`; body is `""` for non-HTML or errors |
-| `parser.py` | ~30 | BeautifulSoup title + link extraction, handles `<base href>` | `parse_page(base_url, html) -> (title, [absolute_urls])` |
-| `engine.py` | ~130 | **Core.** Threaded worker pool, stop flag, page-limit guard | `CrawlEngine(config)`: `.start()`, `.stop()`, `.running`, `.events` (a `queue.Queue` of events.py objects) |
+| `parser.py` | ~60 | BeautifulSoup audit extraction, handles `<base href>` | `parse_page(base_url, html) -> ParsedPage` (title, links, meta_description, canonical_url, h1_count, image_count, images_missing_alt, word_count; word count excludes script/style) |
+| `engine.py` | ~150 | **Core.** Threaded worker pool, stop flag, page-limit guard; work items are `(url, depth, found_on)` | `CrawlEngine(config)`: `.start()`, `.stop()`, `.running`, `.events` (a `queue.Queue` of events.py objects) |
 | `report.py` | ~35 | CSV output | `CsvReport(path)`: `.add(result)`, `.close()` (incremental); `write_report(path, results)` (one-shot) |
 | `cli.py` | ~100 | argparse front end (`fetchly` entry point) | `main(argv)`. Streams rows to CSV as events arrive; Ctrl-C stops gracefully |
 | `gui/app.py` | ~200 | Tkinter front end (`fetchly-gui` entry point) | `FetchlyApp(root)`, `main()`. Settings form, live Treeview table, progress bar, Stop, Export CSV |
@@ -70,8 +70,10 @@ python3 -m http.server 8642 --bind 127.0.0.1 &   # from that dir
 .venv/bin/python -m py_compile src/fetchly/gui/app.py
 ```
 
-There is no test suite yet (see HANDOFF.md next steps). Until one exists,
-verify changes with the local-server smoke test above.
+Test suite: `.venv/bin/python -m pytest tests/ -q` (needs `pip install -e ".[dev]"`).
+`tests/conftest.py` serves a small fixture site on an ephemeral localhost port,
+so the engine integration tests run offline. Run the suite before finishing
+any session; add tests alongside behavior changes.
 
 ## Conventions
 
