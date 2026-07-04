@@ -10,7 +10,7 @@ import threading
 import time
 
 from . import events
-from .audit import audit_page, find_orphans
+from .audit import audit_page, find_duplicates, find_orphans
 from .config import CrawlConfig
 from .fetcher import Fetcher
 from .frontier import Frontier
@@ -31,6 +31,7 @@ class CrawlEngine:
         self._fetcher = Fetcher(config)
         self._robots = RobotsCache(config.user_agent) if config.respect_robots else None
         self._stats = CrawlStats()
+        self._results = []  # retained for site-level checks (duplicates)
         self._stats_lock = threading.Lock()
         self._stop = threading.Event()
         self._pages_claimed = 0
@@ -45,6 +46,10 @@ class CrawlEngine:
         if not start_url:
             raise ValueError(f"Start URL is out of scope: {self.config.start_url}")
         self._work.put((start_url, 0, ""))
+        for seed in self.config.seed_urls:
+            admitted = self._frontier.admit(seed)
+            if admitted:
+                self._work.put((admitted, 0, ""))
         self.events.put(events.CrawlStarted(start_url=start_url))
         for i in range(self.config.num_workers):
             t = threading.Thread(target=self._worker, name=f"fetchly-{i}", daemon=True)
@@ -117,6 +122,7 @@ class CrawlEngine:
 
         with self._stats_lock:
             self._stats.record(result)
+            self._results.append(result)
             self._stats.queued = self._work.qsize()
             snapshot = CrawlStats(**vars(self._stats))
         self.events.put(events.PageCrawled(
@@ -131,6 +137,8 @@ class CrawlEngine:
         result.image_count = parsed.image_count
         result.images_missing_alt = parsed.images_missing_alt
         result.word_count = parsed.word_count
+        result.meta_robots = parsed.meta_robots
+        result.content_hash = parsed.content_hash
         for link in parsed.links:
             if self._frontier.same_site(link):
                 result.internal_links += 1
@@ -142,13 +150,15 @@ class CrawlEngine:
             t.join()
         stopped_early = self._stop.is_set()
 
+        with self._stats_lock:
+            site_issues = find_duplicates(self._results)
+
         # Orphan check: only meaningful when the crawl saw the whole site;
         # a truncated crawl would report false orphans.
-        site_issues = []
         if self.config.check_orphans and not stopped_early:
             sitemap_urls = fetch_sitemap_urls(self._fetcher.session, self.config.start_url,
                                               timeout=self.config.timeout_seconds)
-            site_issues = find_orphans(sitemap_urls, self._frontier)
+            site_issues.extend(find_orphans(sitemap_urls, self._frontier))
 
         self._fetcher.close()
         with self._stats_lock:

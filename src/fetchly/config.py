@@ -20,6 +20,7 @@ class CrawlConfig:
     follow_redirects: bool = True
     user_agent: str = "FetchlyBot/0.1 (+https://github.com/fetchly)"
     exclude_patterns: list = field(default_factory=list)  # substrings to skip
+    seed_urls: list = field(default_factory=list)  # extra URLs queued at depth 0 (URL-list audits)
 
     def validate(self) -> None:
         if not self.start_url.startswith(("http://", "https://")):

@@ -67,6 +67,57 @@ def test_success_does_not_retry(flaky_server):
     assert FlakyHandler.hits == 1
 
 
+class RedirectHandler(BaseHTTPRequestHandler):
+    """/a --302--> /b --301--> /c (200); /loop redirects to itself forever."""
+
+    def do_GET(self):
+        routes = {"/a": (302, "/b"), "/b": (301, "/c"), "/loop": (302, "/loop")}
+        if self.path in routes:
+            code, target = routes[self.path]
+            self.send_response(code)
+            self.send_header("Location", target)
+            self.end_headers()
+        else:
+            body = b"<html><head><title>Landed</title></head><body>done</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def redirect_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_redirect_chain_recorded(redirect_server):
+    result, body = make_fetcher().fetch(redirect_server + "/a", 0)
+    assert result.status_code == 200
+    assert result.redirect_hops == 2
+    assert result.redirect_type == "temporary"  # chain contains a 302
+    assert result.redirected_to == redirect_server + "/c"
+    assert "Landed" in body
+
+
+def test_permanent_redirect_type(redirect_server):
+    result, _ = make_fetcher().fetch(redirect_server + "/b", 0)
+    assert result.redirect_hops == 1
+    assert result.redirect_type == "permanent"
+
+
+def test_redirect_loop_reported(redirect_server):
+    result, body = make_fetcher(max_retries=0).fetch(redirect_server + "/loop", 0)
+    assert result.status_code == 0
+    assert "TooManyRedirects" in result.error
+    assert body == ""
+
+
 def test_connection_error_retried_and_reported():
     fetcher = make_fetcher(max_retries=1)
     result, body = fetcher.fetch("http://127.0.0.1:1/", 0)  # nothing listens

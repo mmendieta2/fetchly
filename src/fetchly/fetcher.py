@@ -51,8 +51,13 @@ class Fetcher:
             result.status_code = response.status_code
             result.ok = response.ok
             result.content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
+            result.x_robots_tag = response.headers.get("X-Robots-Tag", "").lower()
             if response.url != url:
                 result.redirected_to = response.url
+            result.redirect_hops = len(response.history)
+            if response.history:
+                temporary = any(r.status_code in (302, 303, 307) for r in response.history)
+                result.redirect_type = "temporary" if temporary else "permanent"
 
             body = ""
             if result.content_type in _HTML_TYPES or not result.content_type:

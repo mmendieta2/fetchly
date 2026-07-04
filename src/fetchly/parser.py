@@ -1,5 +1,6 @@
 """HTML parsing: extract audit data and outgoing links from a page."""
 
+import hashlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
@@ -18,6 +19,8 @@ class ParsedPage:
     word_count: int = 0
     missing_alt_srcs: "list[str]" = field(default_factory=list)
     mixed_content: "list[str]" = field(default_factory=list)  # http:// resources on an https page
+    meta_robots: str = ""       # content of <meta name="robots">, lowercased
+    content_hash: str = ""      # md5 of normalized visible text, for duplicate detection
 
 
 # Tags whose fetched resources cause mixed-content warnings on https pages.
@@ -38,6 +41,10 @@ def parse_page(base_url: str, html: str) -> ParsedPage:
     meta = soup.find("meta", attrs={"name": "description"})
     if meta and meta.get("content"):
         page.meta_description = meta["content"].strip()
+
+    robots = soup.find("meta", attrs={"name": "robots"})
+    if robots and robots.get("content"):
+        page.meta_robots = robots["content"].strip().lower()
 
     canonical = soup.find("link", rel="canonical", href=True)
     if canonical:
@@ -66,7 +73,11 @@ def parse_page(base_url: str, html: str) -> ParsedPage:
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     body = soup.body or soup
-    page.word_count = len(body.get_text(separator=" ").split())
+    words = body.get_text(separator=" ").split()
+    page.word_count = len(words)
+    if words:
+        normalized = " ".join(words).lower()
+        page.content_hash = hashlib.md5(normalized.encode("utf-8")).hexdigest()
 
     # <base href> changes how relative links resolve.
     base_tag = soup.find("base", href=True)

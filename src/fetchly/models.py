@@ -19,18 +19,24 @@ class PageResult:
     found_on: str = ""  # page where this URL was discovered
     meta_description: str = ""
     canonical_url: str = ""
+    meta_robots: str = ""
+    x_robots_tag: str = ""
+    redirect_hops: int = 0
+    redirect_type: str = ""  # "permanent" | "temporary" | ""
     h1_count: int = 0
     internal_links: int = 0
     external_links: int = 0
     image_count: int = 0
     images_missing_alt: int = 0
     word_count: int = 0
+    content_hash: str = ""
 
     CSV_FIELDS = (
         "url", "status_code", "ok", "depth", "found_on", "content_type",
         "content_length", "title", "meta_description", "canonical_url",
-        "h1_count", "word_count", "elapsed_ms", "redirected_to",
-        "links_found", "internal_links", "external_links",
+        "meta_robots", "x_robots_tag", "h1_count", "word_count",
+        "content_hash", "elapsed_ms", "redirected_to", "redirect_hops",
+        "redirect_type", "links_found", "internal_links", "external_links",
         "image_count", "images_missing_alt", "error",
     )
 

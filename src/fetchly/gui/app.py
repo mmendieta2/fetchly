@@ -14,6 +14,7 @@ from .. import events
 from ..config import CrawlConfig
 from ..engine import CrawlEngine
 from ..report import issues_path_for, write_issues, write_report
+from ..sitemap import write_sitemap
 
 POLL_MS = 100
 
@@ -84,6 +85,9 @@ class FetchlyApp(ttk.Frame):
         self.stop_btn.pack(side="left", padx=6)
         self.export_btn = ttk.Button(buttons, text="Export CSV…", command=self._export, state="disabled")
         self.export_btn.pack(side="left")
+        self.sitemap_btn = ttk.Button(buttons, text="Export Sitemap…",
+                                      command=self._export_sitemap, state="disabled")
+        self.sitemap_btn.pack(side="left", padx=6)
         self.progress = ttk.Progressbar(buttons, mode="determinate", length=220)
         self.progress.pack(side="right")
 
@@ -153,6 +157,7 @@ class FetchlyApp(ttk.Frame):
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self.export_btn.configure(state="disabled")
+        self.sitemap_btn.configure(state="disabled")
         self.status_var.set(f"Crawling {config.start_url}…")
         self.root.after(POLL_MS, self._poll)
 
@@ -205,6 +210,7 @@ class FetchlyApp(ttk.Frame):
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
         self.export_btn.configure(state="normal" if self.results else "disabled")
+        self.sitemap_btn.configure(state="normal" if self.results else "disabled")
         s = event.stats
         suffix = " (stopped)" if event.stopped_by_user else ""
         errors = sum(1 for i in self.issues if i.severity == "error")
@@ -223,6 +229,16 @@ class FetchlyApp(ttk.Frame):
         issues_path = issues_path_for(path)
         write_issues(issues_path, self.issues)
         self.status_var.set(f"Saved {path} and {issues_path}")
+
+    def _export_sitemap(self) -> None:
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xml",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
+            initialfile="sitemap.xml")
+        if not path:
+            return
+        count = write_sitemap(path, self.results)
+        self.status_var.set(f"Sitemap saved to {path} ({count} indexable URLs)")
 
     def _on_close(self) -> None:
         if self.engine:

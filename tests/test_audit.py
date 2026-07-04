@@ -1,7 +1,7 @@
-from fetchly.audit import audit_page
+from fetchly.audit import audit_page, find_duplicates
 from fetchly.models import PageResult
 from fetchly.parser import ParsedPage, parse_page
-from fetchly.sitemap import _extract
+from fetchly.sitemap import _extract, write_sitemap
 
 
 def ok_result(url="https://site.com/p"):
@@ -9,7 +9,13 @@ def ok_result(url="https://site.com/p"):
 
 
 def clean_page():
-    return ParsedPage(title="T", meta_description="d", h1_count=1)
+    return ParsedPage(
+        title="A perfectly reasonable page title for tests",           # 30-60 chars
+        meta_description="A meta description that is comfortably inside the "
+                         "recommended length range for search snippets.",  # 70-155
+        h1_count=1,
+        word_count=500,
+    )
 
 
 def issue_types(issues):
@@ -53,6 +59,101 @@ class TestAuditPage:
         assert issue_types(issues) == {"mixed_content"}
         assert issues[0].severity == "error"
         assert "http://cdn.old.com/app.js" in issues[0].detail
+
+
+class TestSeoChecks:
+    def test_title_too_short_and_long(self):
+        short = clean_page()
+        short.title = "Tiny"
+        assert issue_types(audit_page(ok_result(), short)) == {"title_too_short"}
+        long = clean_page()
+        long.title = "x" * 80
+        assert issue_types(audit_page(ok_result(), long)) == {"title_too_long"}
+
+    def test_meta_description_length(self):
+        page = clean_page()
+        page.meta_description = "too short"
+        assert issue_types(audit_page(ok_result(), page)) == {"meta_description_too_short"}
+        page.meta_description = "y" * 200
+        assert issue_types(audit_page(ok_result(), page)) == {"meta_description_too_long"}
+
+    def test_thin_content(self):
+        page = clean_page()
+        page.word_count = 50
+        assert issue_types(audit_page(ok_result(), page)) == {"thin_content"}
+
+    def test_zero_words_not_flagged_thin(self):
+        page = clean_page()
+        page.word_count = 0
+        assert audit_page(ok_result(), page) == []
+
+    def test_canonical_mismatch(self):
+        page = clean_page()
+        page.canonical_url = "https://site.com/other"
+        assert issue_types(audit_page(ok_result("https://site.com/p"), page)) == {"canonical_mismatch"}
+
+    def test_canonical_match_via_normalization(self):
+        page = clean_page()
+        page.canonical_url = "https://site.com/p#frag"
+        assert audit_page(ok_result("https://site.com/p"), page) == []
+
+    def test_noindex_from_meta_robots(self):
+        result = ok_result()
+        result.meta_robots = "noindex, nofollow"
+        assert issue_types(audit_page(result, clean_page())) == {"noindex"}
+
+    def test_noindex_from_header(self):
+        result = ok_result()
+        result.x_robots_tag = "noindex"
+        assert issue_types(audit_page(result, clean_page())) == {"noindex"}
+
+
+class TestRedirectChecks:
+    def test_redirect_chain(self):
+        result = ok_result()
+        result.redirect_hops, result.redirect_type = 2, "permanent"
+        result.redirected_to = "https://site.com/final"
+        assert issue_types(audit_page(result, clean_page())) == {"redirect_chain"}
+
+    def test_temporary_redirect(self):
+        result = ok_result()
+        result.redirect_hops, result.redirect_type = 1, "temporary"
+        assert issue_types(audit_page(result, clean_page())) == {"temporary_redirect"}
+
+    def test_single_permanent_redirect_ok(self):
+        result = ok_result()
+        result.redirect_hops, result.redirect_type = 1, "permanent"
+        assert audit_page(result, clean_page()) == []
+
+    def test_redirect_loop_from_error(self):
+        result = PageResult(url="https://site.com/x",
+                            error="TooManyRedirects: Exceeded 30 redirects.")
+        issues = audit_page(result, None)
+        assert issue_types(issues) == {"redirect_loop"}
+        assert issues[0].severity == "error"
+
+
+class TestDuplicates:
+    def test_duplicate_titles_and_content(self):
+        a = PageResult(url="https://s.com/a", ok=True, title="Same Title", content_hash="h1")
+        b = PageResult(url="https://s.com/b", ok=True, title="Same Title", content_hash="h1")
+        c = PageResult(url="https://s.com/c", ok=True, title="Other", content_hash="h2")
+        issues = find_duplicates([a, b, c])
+        assert issue_types(issues) == {"duplicate_title", "duplicate_content"}
+        dup = next(i for i in issues if i.issue_type == "duplicate_title")
+        assert "2 pages" in dup.detail
+
+    def test_redirected_and_failed_pages_excluded(self):
+        a = PageResult(url="https://s.com/a", ok=True, title="T" * 40)
+        b = PageResult(url="https://s.com/b", ok=True, title="T" * 40,
+                       redirected_to="https://s.com/a")
+        c = PageResult(url="https://s.com/c", ok=False, title="T" * 40)
+        assert find_duplicates([a, b, c]) == []
+
+    def test_empty_values_not_grouped(self):
+        a = PageResult(url="https://s.com/a", ok=True)
+        b = PageResult(url="https://s.com/b", ok=True)
+        assert find_duplicates([a, b]) == []
 
 
 class TestMixedContentParsing:
@@ -100,3 +201,24 @@ class TestSitemapExtract:
 
     def test_garbage_xml(self):
         assert _extract("not xml at all") == ([], [])
+
+
+class TestSitemapGeneration:
+    def test_writes_only_indexable_pages(self, tmp_path):
+        results = [
+            PageResult(url="https://s.com/keep", status_code=200, ok=True,
+                       content_type="text/html"),
+            PageResult(url="https://s.com/gone", status_code=404, content_type="text/html"),
+            PageResult(url="https://s.com/moved", status_code=200, ok=True,
+                       content_type="text/html", redirected_to="https://s.com/keep"),
+            PageResult(url="https://s.com/hidden", status_code=200, ok=True,
+                       content_type="text/html", meta_robots="noindex"),
+            PageResult(url="https://s.com/err", error="ConnectionError"),
+        ]
+        out = tmp_path / "sitemap.xml"
+        count = write_sitemap(str(out), results)
+        text = out.read_text()
+        assert count == 1
+        assert "<loc>https://s.com/keep</loc>" in text
+        for excluded in ("gone", "moved", "hidden", "err"):
+            assert excluded not in text

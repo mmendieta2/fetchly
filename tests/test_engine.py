@@ -116,6 +116,16 @@ def test_max_depth_limit(test_site):
     assert test_site + "page3.html" not in {r.url for r in results}
 
 
+def test_seed_urls_audited_at_depth_zero(test_site):
+    """URL-list mode: seeds are fetched even though nothing links to them."""
+    config = CrawlConfig(start_url=test_site, max_depth=0, check_orphans=False,
+                         seed_urls=[test_site + "orphan.html"])
+    results, _, _, _ = run_crawl(config)
+    urls = {r.url for r in results}
+    assert urls == {test_site, test_site + "orphan.html"}
+    assert all(r.depth == 0 for r in results)
+
+
 def test_invalid_start_url():
     try:
         CrawlEngine(CrawlConfig(start_url="notaurl"))

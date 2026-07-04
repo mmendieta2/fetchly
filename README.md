@@ -69,6 +69,13 @@ python -m fetchly.gui.app
 | `--all-domains` | no domain restriction | off |
 | `--no-robots` | ignore robots.txt | off |
 | `--exclude STR` | skip URLs containing STR (repeatable) | — |
+| `--sitemap FILE` | also generate an XML sitemap of indexable pages | — |
+| `--url-list FILE` | audit a fixed URL list (one per line) instead of crawling | — |
+| `--no-orphan-check` | skip the sitemap orphan check | off |
+
+`--url-list` is for site migrations: it fetches exactly the listed URLs
+(depth 0, any domain) and reports status/redirect/audit data for each. The
+GUI has an equivalent **Export Sitemap…** button after a crawl.
 
 ## CSV report columns
 
@@ -91,10 +98,20 @@ the same list in the GUI's **Issues** tab. Checks:
 |---|---|---|
 | `broken_link` | error | 4xx/5xx page; detail names the page linking to it |
 | `fetch_error` | error | connection failure/timeout after retries |
+| `redirect_loop` | error | URL redirects to itself (or exceeds 30 hops) |
 | `mixed_content` | error | `http://` scripts/images/styles on an `https://` page |
+| `redirect_chain` | warning | 2+ hops to reach the final URL |
+| `temporary_redirect` | warning | 302/303/307 where a 301 is usually intended |
 | `images_missing_alt` | warning | `<img>` tags without alt text (srcs listed) |
 | `missing_title` / `missing_meta_description` | warning | empty or absent tag |
+| `title_too_short` / `title_too_long` | warning | outside 30–60 characters |
+| `meta_description_too_short` / `_too_long` | warning | outside 70–155 characters |
 | `missing_h1` / `multiple_h1` | warning | page has zero or 2+ `<h1>` |
+| `thin_content` | warning | fewer than 200 words of visible text |
+| `noindex` | warning | excluded from search via meta robots or X-Robots-Tag |
+| `canonical_mismatch` | warning | rel=canonical points at a different URL |
+| `duplicate_title` / `duplicate_meta_description` | warning | same value on 2+ pages |
+| `duplicate_content` | warning | identical visible text (md5) on 2+ pages |
 | `orphan_page` | warning | listed in `sitemap.xml` but not linked from any crawled page |
 
 The orphan check fetches `/sitemap.xml` (sitemap indexes supported) after the
