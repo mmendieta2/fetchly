@@ -104,8 +104,15 @@ class FetchlyApp(ttk.Frame):
         self.graph_btn = ttk.Button(buttons, text="Export Graph…",
                                     command=self._export_graph, state="disabled")
         self.graph_btn.pack(side="left")
-        self.progress = ttk.Progressbar(buttons, mode="determinate", length=220)
+        # Progress is an estimate: crawled / (crawled + still queued), capped
+        # by max_pages — a crawler can't know the true total up front, so the
+        # percentage can dip when newly discovered links enlarge the queue.
+        self.progress = ttk.Progressbar(buttons, mode="determinate",
+                                        maximum=100, length=220)
         self.progress.pack(side="right")
+        self.percent_var = tk.StringVar(value="")
+        ttk.Label(buttons, textvariable=self.percent_var, width=5,
+                  anchor="e").pack(side="right", padx=(0, 4))
 
     def _make_tree(self, parent, headers) -> ttk.Treeview:
         tree = ttk.Treeview(parent, columns=tuple(headers), show="headings")
@@ -171,7 +178,9 @@ class FetchlyApp(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         self.issues_tree.delete(*self.issues_tree.get_children())
         self.notebook.tab(1, text="Issues")
-        self.progress.configure(maximum=config.max_pages, value=0)
+        self._max_pages = config.max_pages
+        self.progress.configure(value=0)
+        self.percent_var.set("0%")
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self.export_btn.configure(state="disabled")
@@ -210,7 +219,10 @@ class FetchlyApp(ttk.Frame):
         self.tree.insert("", "end", values=(
             r.status_code or "ERR", r.depth, r.elapsed_ms, r.title, r.url), tags=tags)
         s = event.stats
-        self.progress.configure(value=s.crawled)
+        expected_total = min(s.crawled + s.queued, self._max_pages) or 1
+        percent = min(100, round(100 * s.crawled / expected_total))
+        self.progress.configure(value=percent)
+        self.percent_var.set(f"{percent}%")
         self.status_var.set(
             f"Crawled {s.crawled}  |  queued {s.queued}  |  errors {s.errors}  |  "
             f"issues {len(self.issues)}  |  {s.bytes_downloaded / 1024:.0f} KiB")
@@ -225,6 +237,10 @@ class FetchlyApp(ttk.Frame):
             self.notebook.tab(1, text=f"Issues ({len(self.issues)})")
 
     def _on_finished(self, event) -> None:
+        if not event.stopped_by_user:
+            # Crawl ran to completion: whatever the estimate said, it's done.
+            self.progress.configure(value=100)
+            self.percent_var.set("100%")
         self.engine = None
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
