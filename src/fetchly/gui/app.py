@@ -165,6 +165,10 @@ class FetchlyApp(ttk.Frame):
         self.issues_tree = self._make_tree(issues_tab, {
             "severity": ("Severity", 80, False), "type": ("Type", 170, False),
             "page": ("Page", 340, True), "detail": ("Detail", 340, True)})
+        # The detail column clips long messages; double-click or Enter opens
+        # the full text (also on the right-click menu).
+        self.issues_tree.bind("<Double-1>", self._show_issue_detail)
+        self.issues_tree.bind("<Return>", self._show_issue_detail)
 
     def _install_context_menus(self) -> None:
         """Right-click menus: edit actions on entries, copy actions on tables."""
@@ -181,6 +185,7 @@ class FetchlyApp(ttk.Frame):
 
         self._tree_target = None
         self._tree_menu = tk.Menu(self.root, tearoff=0)
+        self._tree_menu.add_command(label="View Details", command=self._show_issue_detail)
         self._tree_menu.add_command(label="Copy Cell", command=self._copy_cell)
         self._tree_menu.add_command(label="Copy Row", command=self._copy_row)
         self._tree_menu.add_command(label="Copy URL", command=self._copy_url)
@@ -247,6 +252,42 @@ class FetchlyApp(ttk.Frame):
             if name in columns:
                 self._copy_to_clipboard(str(tree.item(row, "values")[columns.index(name)]))
                 return
+
+    def _show_issue_detail(self, event=None) -> None:
+        """Open a window with the selected row's full, untruncated fields.
+
+        Works from a double-click/Enter on the tree or the right-click menu.
+        """
+        tree = row = None
+        if isinstance(getattr(event, "widget", None), ttk.Treeview):
+            tree = event.widget
+            row = tree.focus() or (tree.selection()[0] if tree.selection() else None)
+        elif self._tree_target is not None:
+            tree, row, _ = self._tree_target
+        if not tree or not row:
+            return
+
+        columns = tree["columns"]
+        values = tree.item(row, "values")
+        pairs = [(tree.heading(c, "text"), str(v)) for c, v in zip(columns, values)]
+        content = "\n\n".join(f"{h}:\n{v}" for h, v in pairs if v)
+
+        win = tk.Toplevel(self.root)
+        win.title("Details")
+        win.geometry("560x340")
+        win.transient(self.root)
+        text = tk.Text(win, wrap="word", padx=10, pady=10, height=12,
+                       relief="flat", background=self.root.cget("background"))
+        text.insert("1.0", content)
+        text.configure(state="disabled")
+        text.pack(fill="both", expand=True)
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Button(bar, text="Copy", command=lambda: self._copy_to_clipboard(content)
+                   ).pack(side="right", padx=(6, 0))
+        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.focus_set()
 
     def _build_statusbar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
