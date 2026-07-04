@@ -2,3 +2,10 @@
 __pycache__/
 *.egg-info/
 *.csv
+
+# AI assistant context files (local working docs, not part of the product)
+AGENTS.md
+HANDOFF.md
+ROADMAP.md
+CLAUDE.md
+.claude/
