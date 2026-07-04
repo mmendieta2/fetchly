@@ -9,15 +9,19 @@ import sys
 # add ~300 MB and still require `playwright install chromium` on the user's
 # machine. The engine imports jsfetch lazily, so the build stays clean.
 EXCLUDES = ["playwright", "pytest"]
+# Bundle vendored assets (axe-core for --a11y) alongside the package.
+DATAS = [("../src/fetchly/vendor", "fetchly/vendor")]
 
 gui_a = Analysis(
     ["launch_gui.py"],
     pathex=["../src"],
+    datas=DATAS,
     excludes=EXCLUDES,
 )
 cli_a = Analysis(
     ["launch_cli.py"],
     pathex=["../src"],
+    datas=DATAS,
     excludes=EXCLUDES,
 )
 
