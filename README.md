@@ -43,7 +43,31 @@ Design rules:
 - **Politeness**: per-host robots.txt cache (fail-open), optional per-worker
   delay, identifying User-Agent, 5 MiB body cap.
 
-## Install & run
+## Standalone app (no Python needed)
+
+Prebuilt, dependency-free binaries are published as GitHub Release assets:
+
+| OS | Asset | Run |
+|---|---|---|
+| Windows 10/11 | `Fetchly-windows-x64.zip` | unzip → double-click `Fetchly.exe` (GUI) or `fetchly-cli.exe <url>` |
+| macOS | `Fetchly-macos.dmg` | open dmg → right-click `Fetchly.app` → Open (first launch only) |
+| Linux (Arch/CachyOS) | `Fetchly-linux-x86_64.tar.gz` | `tar xzf` → `./Fetchly` or `./fetchly-cli <url>`; or `makepkg -si` with `packaging/arch/PKGBUILD` |
+| Linux (older glibc) | `Fetchly-linux-glibc-x86_64.tar.gz` | same, built on Ubuntu for wider compatibility |
+
+Binaries are unsigned (code signing requires paid certificates): Windows
+SmartScreen → "More info" → "Run anyway"; macOS Gatekeeper → right-click →
+Open or `xattr -dr com.apple.quarantine Fetchly.app`. JavaScript rendering
+is not bundled (≈300 MB) — use the pip install below with `fetchly[js]`.
+
+**Building the binaries** (maintainers): PyInstaller cannot cross-compile,
+so each OS builds its own — `packaging/build_windows.bat`,
+`packaging/build_macos.sh`, `packaging/build_linux.sh` (shared spec:
+`packaging/fetchly.spec`). Pushing a `v*` tag runs
+`.github/workflows/release.yml`, which builds all three on CI and attaches
+the assets to the release. Linux binaries link the build machine's glibc —
+build on the oldest distro you target.
+
+## Install & run (from source)
 
 ```bash
 pip install -e .

@@ -1,0 +1,20 @@
+# Maintainer: Maynor Mendieta
+# Installs the prebuilt Fetchly binaries from a GitHub release tarball.
+# Usage: place Fetchly-linux-x86_64.tar.gz next to this file (or let makepkg
+# download it once `url` points at your GitHub repo), then: makepkg -si
+pkgname=fetchly-bin
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="Website crawler and SEO auditor with GUI and CLI (prebuilt binaries)"
+arch=('x86_64')
+url="https://github.com/OWNER/fetchly"
+license=('MIT')
+provides=('fetchly')
+conflicts=('fetchly')
+source=("Fetchly-linux-x86_64.tar.gz::$url/releases/download/v$pkgver/Fetchly-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  install -Dm755 "$srcdir/Fetchly" "$pkgdir/usr/bin/fetchly-gui"
+  install -Dm755 "$srcdir/fetchly-cli" "$pkgdir/usr/bin/fetchly"
+}
