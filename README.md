@@ -64,6 +64,7 @@ python -m fetchly.gui.app
 | `-d/--max-depth` | link depth limit | 5 |
 | `-w/--workers` | concurrent workers | 8 |
 | `--delay` | per-worker delay (s) | 0 |
+| `--retries` | extra attempts on connection errors / 429 / 5xx | 2 |
 | `--subdomains` | crawl subdomains too | off |
 | `--all-domains` | no domain restriction | off |
 | `--no-robots` | ignore robots.txt | off |

@@ -5,79 +5,90 @@
 > of each session. Keep it current — it replaces reading the git log and
 > the codebase.
 
-**Last updated:** 2026-07-03 (session: initial scaffold, by Claude Code)
+**Last updated:** 2026-07-03 (session 2: tests + audit features, by Claude Code)
 
 ## Project status
 
-v0.1 complete and working. The whole crawler (engine + CLI + GUI) was built
-from scratch this session and the CLI was verified end-to-end against a local
-test site (4 pages, correct depths, 404 flagged, mailto/image/fragment links
-filtered, CSV correct). Nothing is committed to git yet — the repo has no
-commits; all files are untracked.
+v0.1 complete, tested, and committed (3 commits after the scaffold). The
+crawler now has: a 35-test pytest suite (all passing, ~3.5s, runs fully
+offline against fixture servers in `tests/conftest.py`), WordPress-audit
+CSV columns (meta description, canonical URL, h1/image/word counts,
+internal/external link split, images missing alt), broken-link referrer
+tracking (`found_on` column — for a 404 row it names the page holding the
+broken link), and retry-with-backoff on transient failures (connection
+errors, 429/502/503/504; `max_retries`/`retry_backoff_seconds` in config,
+`--retries` CLI flag, "Retries" field in the GUI form).
 
 ## Current task
 
-**None in progress.** The scaffold is finished and verified. Pick up from
-"Next tasks" below.
+**None in progress.** All work is committed and the working tree is clean
+(verify with `git status`). Pick up from "Next tasks" below.
 
 ## Working files (what was touched last session)
 
 | File | State |
 |---|---|
-| `pyproject.toml` | done — deps, `fetchly` + `fetchly-gui` entry points |
-| `src/fetchly/*.py` (all modules) | done — see codebase map in AGENTS.md |
-| `src/fetchly/gui/app.py` | done, but **only syntax-checked** — Tk is not installed on this machine, so the GUI has never been rendered |
-| `README.md` | done — user-facing docs + architecture diagram |
-| `.gitignore` | done — `.venv/`, `__pycache__/`, `*.egg-info/`, `*.csv` |
+| `tests/` (conftest + test_frontier/parser/engine/fetcher) | new — 35 tests, all passing |
+| `src/fetchly/parser.py` | rewritten — `parse_page` now returns a `ParsedPage` dataclass (breaking change from the old `(title, links)` tuple; engine already updated) |
+| `src/fetchly/models.py` | extended — 9 new `PageResult` fields + reordered `CSV_FIELDS` |
+| `src/fetchly/engine.py` | work items now `(url, depth, found_on)`; new `_apply_parsed()` helper |
+| `src/fetchly/frontier.py` | added `same_site()` for internal/external classification |
+| `src/fetchly/fetcher.py` | `fetch()` is now a retry loop around `_fetch_once()` |
+| `src/fetchly/config.py`, `cli.py`, `gui/app.py` | retry setting plumbed through all three |
+| `pyproject.toml` | added `[project.optional-dependencies] dev = ["pytest>=8"]` |
+| `README.md`, `AGENTS.md` | updated to match (CSV columns, codebase map, test instructions) |
 
 ## Next tasks (in priority order)
 
-1. **Initial git commit.** Everything is untracked. Commit the scaffold as
-   v0.1 before making further changes.
-2. **Manually test the GUI** once Tk is installed (`sudo pacman -S tk`, then
-   `.venv/bin/fetchly-gui`). Verify: start/stop a crawl, table fills, progress
-   bar advances, Export CSV works, closing the window mid-crawl doesn't hang.
-3. **Add a pytest test suite** (`tests/`). Highest-value targets:
-   - `frontier.py`: normalize() cases, scope policy (subdomains, excludes,
-     binary extensions), admit() dedupe.
-   - `parser.py`: link extraction, `<base href>`, missing title.
-   - `engine.py`: integration test against `http.server` on localhost
-     (mirror the smoke test in AGENTS.md); test stop() and max_pages.
-   - Add `pytest` under a `[project.optional-dependencies] dev` extra.
-4. **Richer page analysis for the audit use case** (the owner's real goal —
-   WordPress site auditing). Candidate columns for `PageResult`:
-   meta description, h1 count, canonical URL, internal vs external link
-   counts, image count / images missing alt, word count. Follow AGENTS.md
-   rule 4 (extend PageResult + CSV_FIELDS) so the CSV picks them up
-   automatically.
-5. **Broken-link detail**: record *which page linked to* each 404 (a
-   `found_on` column). Needs the frontier/work queue to carry the referrer
-   URL along with `(url, depth)`.
-6. Later / nice-to-have: retry-with-backoff for transient errors in
-   `fetcher.py`; sitemap.xml seeding; per-host rate limiting instead of the
-   global per-worker delay; packaging a standalone binary (PyInstaller) for
-   Windows/mac distribution.
+1. **Manually test the GUI** — still blocked on Tk not being installed
+   (`sudo pacman -S tk`, then `.venv/bin/fetchly-gui`). Verify: start/stop a
+   crawl, table fills, progress bar advances, Export CSV works, closing the
+   window mid-crawl doesn't hang. Also eyeball the new "Retries" form field
+   added blind this session.
+2. **Show audit data in the GUI.** The new PageResult fields land in the CSV
+   but the GUI table still shows only status/depth/ms/title/url. Options:
+   add columns (crowded), or a detail pane showing the selected row's full
+   record. Detail pane recommended.
+3. **Sitemap.xml seeding** — parse `/sitemap.xml` (and sitemap indexes) and
+   seed the frontier so orphaned pages get audited too. Natural home: a new
+   `sitemap.py` + a `use_sitemap` CrawlConfig flag; seed in `CrawlEngine.start()`.
+4. **Per-host rate limiting** to replace the global per-worker delay
+   (only matters once multi-domain crawls are common; low priority).
+5. **Packaging**: PyInstaller one-file builds for Windows/mac distribution.
 
 ## Warnings & gotchas
 
-- **GUI is unverified at runtime.** It compiles, and the event-queue design
-  is the same one the (verified) CLI uses, but no human has seen the window.
-  Expect layout tweaks on first run.
-- **Tk missing on this machine** (CachyOS/Arch): `ImportError: libtk8.6.so`.
-  Fix: `sudo pacman -S tk`. Don't "fix" this in code — it's an environment issue.
-- `Fetcher.fetch()` uses `stream=True` + `response.raw.read(5 MiB)` to cap
-  body size; if you switch to `response.text` you lose that cap.
-- `engine.stop()` is also how the page limit halts the crawl
-  (`_claim_page_slot` sets the stop flag). If you add new stop reasons,
-  update the `stopped_by_user` logic in `_supervisor()`.
-- Python on this machine is 3.14, but the code targets ≥ 3.9 — don't
-  introduce 3.10+ syntax.
-- The venv is `.venv/` at repo root; the package is installed editable, so
-  source edits take effect immediately.
+- **GUI is still unverified at runtime** (no Tk on this machine —
+  `ImportError: libtk8.6.so`; environment issue, don't "fix" in code).
+  The Retries field and earlier layout have never been rendered.
+- `parse_page()` returns `ParsedPage` now. Any code snippet or doc that
+  shows tuple unpacking `(title, links)` is stale.
+- **Retry interacts with timing tests**: `fetch()` sleeps between attempts
+  (0.5s doubling by default). In tests, pass `retry_backoff_seconds=0.01`
+  or `max_retries=0` or suites get slow.
+- `elapsed_ms` on a retried fetch is the *last attempt only*, not total time.
+- Internal/external link classification (`Frontier.same_site`) counts all
+  subdomains as internal regardless of the `include_subdomains` crawl
+  setting — intentional, see AGENTS.md map.
+- `tests/test_fetcher.py` uses class attributes on `FlakyHandler` for
+  hit-counting — tests in that file must not run in parallel (fine under
+  plain pytest; would break under pytest-xdist without changes).
+- `Fetcher.fetch()` relies on `stream=True` + `response.raw.read(5 MiB)`
+  for the body cap; switching to `response.text` loses the cap.
+- `engine.stop()` doubles as the page-limit halt (`_claim_page_slot` sets
+  the stop flag); `stopped_by_user` logic in `_supervisor()` depends on it.
+- Python here is 3.14 but code targets ≥ 3.9 — no 3.10+ syntax.
+- Venv at `.venv/`, package installed editable (`pip install -e ".[dev]"`).
 
 ## Session changelog
 
-- **2026-07-03** — Scaffolded entire project: layered architecture
+- **2026-07-03 (session 2)** — Initial git commit of scaffold; pytest suite
+  (frontier/parser/engine/fetcher, offline fixture servers); audit columns
+  (meta_description, canonical_url, h1_count, internal/external_links,
+  image_count, images_missing_alt, word_count); `found_on` referrer tracking
+  through the work queue; retry-with-backoff in fetcher (config + CLI flag +
+  GUI field); docs updated. 35 tests passing; 4 commits total on main.
+- **2026-07-03 (session 1)** — Scaffolded entire project: layered architecture
   (config/models/events/frontier/robots/fetcher/parser/engine/report),
   argparse CLI with incremental CSV writing, Tkinter GUI with event-queue
   polling, README, pyproject with entry points. Verified CLI end-to-end
