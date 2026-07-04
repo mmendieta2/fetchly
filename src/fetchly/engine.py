@@ -10,12 +10,14 @@ import threading
 import time
 
 from . import events
+from .audit import audit_page, find_orphans
 from .config import CrawlConfig
 from .fetcher import Fetcher
 from .frontier import Frontier
 from .models import CrawlStats
 from .parser import parse_page
 from .robots import RobotsCache
+from .sitemap import fetch_sitemap_urls
 
 
 class CrawlEngine:
@@ -102,6 +104,7 @@ class CrawlEngine:
         result, body = self._fetcher.fetch(url, depth)
         result.found_on = found_on
 
+        parsed = None
         if body:
             base = result.redirected_to or url
             parsed = parse_page(base, body)
@@ -116,7 +119,8 @@ class CrawlEngine:
             self._stats.record(result)
             self._stats.queued = self._work.qsize()
             snapshot = CrawlStats(**vars(self._stats))
-        self.events.put(events.PageCrawled(result=result, stats=snapshot))
+        self.events.put(events.PageCrawled(
+            result=result, stats=snapshot, issues=audit_page(result, parsed)))
 
     def _apply_parsed(self, result, parsed) -> None:
         result.title = parsed.title
@@ -136,10 +140,21 @@ class CrawlEngine:
     def _supervisor(self) -> None:
         for t in self._threads:
             t.join()
+        stopped_early = self._stop.is_set()
+
+        # Orphan check: only meaningful when the crawl saw the whole site;
+        # a truncated crawl would report false orphans.
+        site_issues = []
+        if self.config.check_orphans and not stopped_early:
+            sitemap_urls = fetch_sitemap_urls(self._fetcher.session, self.config.start_url,
+                                              timeout=self.config.timeout_seconds)
+            site_issues = find_orphans(sitemap_urls, self._frontier)
+
         self._fetcher.close()
         with self._stats_lock:
             snapshot = CrawlStats(**vars(self._stats))
         self.events.put(events.CrawlFinished(
             stats=snapshot,
-            stopped_by_user=self._stop.is_set() and self._pages_claimed < self.config.max_pages,
+            stopped_by_user=stopped_early and self._pages_claimed < self.config.max_pages,
+            issues=site_issues,
         ))

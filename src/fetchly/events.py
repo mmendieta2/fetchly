@@ -5,7 +5,7 @@ drain the queue on their own schedule. This keeps the engine free of any
 UI dependency and keeps Tkinter calls on the main thread.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .models import CrawlStats, PageResult
 
@@ -19,6 +19,7 @@ class CrawlStarted:
 class PageCrawled:
     result: PageResult
     stats: CrawlStats
+    issues: list = field(default_factory=list)  # audit.Issue for this page
 
 
 @dataclass
@@ -32,3 +33,4 @@ class CrawlFinished:
     stats: CrawlStats
     stopped_by_user: bool = False
     fatal_error: str = ""
+    issues: list = field(default_factory=list)  # site-level issues (orphan pages)

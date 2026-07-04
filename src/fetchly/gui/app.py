@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from .. import events
 from ..config import CrawlConfig
 from ..engine import CrawlEngine
-from ..report import write_report
+from ..report import issues_path_for, write_issues, write_report
 
 POLL_MS = 100
 
@@ -24,6 +24,7 @@ class FetchlyApp(ttk.Frame):
         self.root = root
         self.engine = None
         self.results = []
+        self.issues = []
         root.title("Fetchly — Website Crawler")
         root.geometry("980x640")
         root.minsize(760, 480)
@@ -86,21 +87,35 @@ class FetchlyApp(ttk.Frame):
         self.progress = ttk.Progressbar(buttons, mode="determinate", length=220)
         self.progress.pack(side="right")
 
-    def _build_table(self) -> None:
-        columns = ("status", "depth", "time", "title", "url")
-        container = ttk.Frame(self)
-        container.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(container, columns=columns, show="headings")
-        headers = {"status": ("Status", 70), "depth": ("Depth", 60),
-                   "time": ("ms", 70), "title": ("Title", 260), "url": ("URL", 420)}
-        for col, (text, width) in headers.items():
-            self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, stretch=(col in ("title", "url")))
-        vsb = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
+    def _make_tree(self, parent, headers) -> ttk.Treeview:
+        tree = ttk.Treeview(parent, columns=tuple(headers), show="headings")
+        for col, (text, width, stretch) in headers.items():
+            tree.heading(col, text=text)
+            tree.column(col, width=width, stretch=stretch)
+        vsb = ttk.Scrollbar(parent, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
-        self.tree.tag_configure("error", foreground="#c0392b")
+        tree.tag_configure("error", foreground="#c0392b")
+        tree.tag_configure("warning", foreground="#b9770e")
+        return tree
+
+    def _build_table(self) -> None:
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True)
+
+        pages_tab = ttk.Frame(self.notebook)
+        self.notebook.add(pages_tab, text="Pages")
+        self.tree = self._make_tree(pages_tab, {
+            "status": ("Status", 70, False), "depth": ("Depth", 60, False),
+            "time": ("ms", 70, False), "title": ("Title", 260, True),
+            "url": ("URL", 420, True)})
+
+        issues_tab = ttk.Frame(self.notebook)
+        self.notebook.add(issues_tab, text="Issues")
+        self.issues_tree = self._make_tree(issues_tab, {
+            "severity": ("Severity", 80, False), "type": ("Type", 170, False),
+            "page": ("Page", 340, True), "detail": ("Detail", 340, True)})
 
     def _build_statusbar(self) -> None:
         self.status_var = tk.StringVar(value="Ready.")
@@ -130,7 +145,10 @@ class FetchlyApp(ttk.Frame):
             return
         self.engine = engine
         self.results = []
+        self.issues = []
         self.tree.delete(*self.tree.get_children())
+        self.issues_tree.delete(*self.issues_tree.get_children())
+        self.notebook.tab(1, text="Issues")
         self.progress.configure(maximum=config.max_pages, value=0)
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
@@ -152,7 +170,9 @@ class FetchlyApp(ttk.Frame):
                 break
             if isinstance(event, events.PageCrawled):
                 self._add_row(event)
+                self._add_issues(event.issues)
             elif isinstance(event, events.CrawlFinished):
+                self._add_issues(event.issues)
                 finished = event
         if finished:
             self._on_finished(finished)
@@ -169,7 +189,16 @@ class FetchlyApp(ttk.Frame):
         self.progress.configure(value=s.crawled)
         self.status_var.set(
             f"Crawled {s.crawled}  |  queued {s.queued}  |  errors {s.errors}  |  "
-            f"{s.bytes_downloaded / 1024:.0f} KiB")
+            f"issues {len(self.issues)}  |  {s.bytes_downloaded / 1024:.0f} KiB")
+
+    def _add_issues(self, issues) -> None:
+        for issue in issues:
+            self.issues.append(issue)
+            self.issues_tree.insert("", "end", values=(
+                issue.severity, issue.issue_type, issue.page_url, issue.detail),
+                tags=(issue.severity,))
+        if issues:
+            self.notebook.tab(1, text=f"Issues ({len(self.issues)})")
 
     def _on_finished(self, event) -> None:
         self.engine = None
@@ -178,7 +207,10 @@ class FetchlyApp(ttk.Frame):
         self.export_btn.configure(state="normal" if self.results else "disabled")
         s = event.stats
         suffix = " (stopped)" if event.stopped_by_user else ""
-        self.status_var.set(f"Finished{suffix}: {s.crawled} pages, {s.errors} errors.")
+        errors = sum(1 for i in self.issues if i.severity == "error")
+        self.status_var.set(
+            f"Finished{suffix}: {s.crawled} pages — {errors} error issues, "
+            f"{len(self.issues) - errors} warnings.")
 
     def _export(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -188,7 +220,9 @@ class FetchlyApp(ttk.Frame):
         if not path:
             return
         write_report(path, self.results)
-        self.status_var.set(f"Report saved to {path}")
+        issues_path = issues_path_for(path)
+        write_issues(issues_path, self.issues)
+        self.status_var.set(f"Saved {path} and {issues_path}")
 
     def _on_close(self) -> None:
         if self.engine:

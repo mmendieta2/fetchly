@@ -16,6 +16,16 @@ class ParsedPage:
     image_count: int = 0
     images_missing_alt: int = 0
     word_count: int = 0
+    missing_alt_srcs: "list[str]" = field(default_factory=list)
+    mixed_content: "list[str]" = field(default_factory=list)  # http:// resources on an https page
+
+
+# Tags whose fetched resources cause mixed-content warnings on https pages.
+_RESOURCE_TAGS = (
+    ("img", "src"), ("script", "src"), ("iframe", "src"),
+    ("source", "src"), ("audio", "src"), ("video", "src"),
+    ("embed", "src"), ("object", "data"),
+)
 
 
 def parse_page(base_url: str, html: str) -> ParsedPage:
@@ -37,7 +47,21 @@ def parse_page(base_url: str, html: str) -> ParsedPage:
 
     images = soup.find_all("img")
     page.image_count = len(images)
-    page.images_missing_alt = sum(1 for img in images if not img.get("alt", "").strip())
+    for img in images:
+        if not img.get("alt", "").strip():
+            page.missing_alt_srcs.append(img.get("src", "(no src)"))
+    page.images_missing_alt = len(page.missing_alt_srcs)
+
+    if base_url.startswith("https://"):
+        for tag_name, attr in _RESOURCE_TAGS:
+            for tag in soup.find_all(tag_name):
+                value = (tag.get(attr) or "").strip()
+                if value.startswith("http://"):
+                    page.mixed_content.append(value)
+        for link_tag in soup.find_all("link", href=True):
+            rel = " ".join(link_tag.get("rel") or [])
+            if rel in ("stylesheet", "preload", "icon") and link_tag["href"].strip().startswith("http://"):
+                page.mixed_content.append(link_tag["href"].strip())
 
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()

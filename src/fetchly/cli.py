@@ -7,7 +7,7 @@ import sys
 from . import events
 from .config import CrawlConfig
 from .engine import CrawlEngine
-from .report import CsvReport
+from .report import CsvReport, issues_path_for, write_issues
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--subdomains", action="store_true", help="Also crawl subdomains")
     p.add_argument("--all-domains", action="store_true", help="Do not restrict to the start domain")
     p.add_argument("--no-robots", action="store_true", help="Ignore robots.txt")
+    p.add_argument("--no-orphan-check", action="store_true",
+                   help="Skip the sitemap.xml orphan-page check")
     p.add_argument("--exclude", action="append", default=[], help="Skip URLs containing this substring (repeatable)")
     p.add_argument("-q", "--quiet", action="store_true")
     return p
@@ -42,6 +44,7 @@ def main(argv=None) -> int:
         same_domain_only=not args.all_domains,
         include_subdomains=args.subdomains,
         respect_robots=not args.no_robots,
+        check_orphans=not args.no_orphan_check,
         exclude_patterns=args.exclude,
     )
 
@@ -53,6 +56,7 @@ def main(argv=None) -> int:
         return 2
 
     report = CsvReport(args.output)
+    issues = []
     finished = None
     try:
         while finished is None:
@@ -62,6 +66,7 @@ def main(argv=None) -> int:
                 continue
             if isinstance(event, events.PageCrawled):
                 report.add(event.result)
+                issues.extend(event.issues)
                 if not args.quiet:
                     r = event.result
                     status = r.status_code or "ERR"
@@ -70,6 +75,7 @@ def main(argv=None) -> int:
                 print(f"    skipped ({event.reason}): {event.url}")
             elif isinstance(event, events.CrawlFinished):
                 finished = event
+                issues.extend(event.issues)
     except KeyboardInterrupt:
         print("\nStopping...", file=sys.stderr)
         engine.stop()
@@ -77,14 +83,29 @@ def main(argv=None) -> int:
             event = engine.events.get()
             if isinstance(event, events.PageCrawled):
                 report.add(event.result)
+                issues.extend(event.issues)
             elif isinstance(event, events.CrawlFinished):
                 finished = event
+                issues.extend(event.issues)
     finally:
         report.close()
 
+    issues_path = issues_path_for(args.output)
+    write_issues(issues_path, issues)
+
     s = finished.stats
-    print(f"\nDone: {s.crawled} pages, {s.errors} errors, "
-          f"{s.bytes_downloaded / 1024:.1f} KiB. Report: {args.output}")
+    errors = sum(1 for i in issues if i.severity == "error")
+    warnings = len(issues) - errors
+    print(f"\nDone: {s.crawled} pages, {s.errors} fetch errors, "
+          f"{s.bytes_downloaded / 1024:.1f} KiB.")
+    print(f"Issues: {errors} errors, {warnings} warnings.")
+    if not args.quiet:
+        by_type = {}
+        for issue in issues:
+            by_type[issue.issue_type] = by_type.get(issue.issue_type, 0) + 1
+        for issue_type, count in sorted(by_type.items(), key=lambda kv: -kv[1]):
+            print(f"  {issue_type}: {count}")
+    print(f"Reports: {args.output}, {issues_path}")
     return 0
 
 

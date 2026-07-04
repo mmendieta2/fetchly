@@ -16,6 +16,7 @@ class CrawlConfig:
     same_domain_only: bool = True
     include_subdomains: bool = False
     respect_robots: bool = True
+    check_orphans: bool = True    # compare sitemap.xml against discovered URLs
     follow_redirects: bool = True
     user_agent: str = "FetchlyBot/0.1 (+https://github.com/fetchly)"
     exclude_patterns: list = field(default_factory=list)  # substrings to skip

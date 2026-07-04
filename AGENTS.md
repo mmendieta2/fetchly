@@ -22,15 +22,17 @@ whether to read a file or trust this summary.
 |---|---|---|---|
 | `config.py` | ~40 | All crawl settings in one dataclass | `CrawlConfig(start_url, max_pages, max_depth, num_workers, delay_seconds, timeout_seconds, max_retries, retry_backoff_seconds, same_domain_only, include_subdomains, respect_robots, follow_redirects, user_agent, exclude_patterns)`, `.validate()` |
 | `models.py` | ~70 | Result/stat dataclasses | `PageResult` (url, status_code, ok, depth, found_on, content_type, content_length, title, meta_description, canonical_url, h1_count, internal_links, external_links, image_count, images_missing_alt, word_count, elapsed_ms, redirected_to, links_found, error; `CSV_FIELDS`, `.as_row()`), `CrawlStats` (crawled, queued, errors, skipped, bytes_downloaded, status_counts; `.record(result)`) |
-| `events.py` | ~40 | Engine→UI event dataclasses | `CrawlStarted(start_url)`, `PageCrawled(result, stats)`, `UrlSkipped(url, reason)`, `CrawlFinished(stats, stopped_by_user, fatal_error)` |
+| `events.py` | ~45 | Engine→UI event dataclasses | `CrawlStarted(start_url)`, `PageCrawled(result, stats, issues)`, `UrlSkipped(url, reason)`, `CrawlFinished(stats, stopped_by_user, fatal_error, issues)` — per-page issues ride on PageCrawled; site-level (orphans) on CrawlFinished |
 | `frontier.py` | ~85 | URL normalization, dedupe, scope policy | `normalize(url)`, `Frontier(config)`: `.admit(url) -> str` (normalized URL if new+in-scope, else `""`), `.in_scope(url)`, `.same_site(url)` (internal/external classification, subdomains always internal). Skips binary extensions, non-http schemes, excluded substrings |
 | `robots.py` | ~35 | Per-host robots.txt cache (stdlib parser), fails open | `RobotsCache(user_agent).allowed(url) -> bool` |
 | `fetcher.py` | ~85 | HTTP layer: shared requests.Session, timing, 5 MiB body cap, retry w/ doubling backoff on connection errors and 429/502/503/504 | `Fetcher(config).fetch(url, depth) -> (PageResult, html_body)`; body is `""` for non-HTML or errors |
-| `parser.py` | ~60 | BeautifulSoup audit extraction, handles `<base href>` | `parse_page(base_url, html) -> ParsedPage` (title, links, meta_description, canonical_url, h1_count, image_count, images_missing_alt, word_count; word count excludes script/style) |
+| `parser.py` | ~90 | BeautifulSoup audit extraction, handles `<base href>` | `parse_page(base_url, html) -> ParsedPage` (title, links, meta_description, canonical_url, h1_count, image_count, images_missing_alt, missing_alt_srcs, mixed_content, word_count; word count excludes script/style; mixed_content only populated for https pages) |
+| `audit.py` | ~85 | Issue model + audit checks | `Issue(page_url, issue_type, severity, detail)` with `CSV_FIELDS`/`.as_row()`; `audit_page(result, parsed) -> [Issue]` (broken_link, fetch_error, mixed_content, images_missing_alt, missing_title, missing_meta_description, missing_h1, multiple_h1); `find_orphans(sitemap_urls, frontier) -> [Issue]` |
+| `sitemap.py` | ~45 | sitemap.xml fetch/parse, handles sitemap indexes, caps at 20 files | `fetch_sitemap_urls(session, start_url, timeout) -> [url]` |
 | `engine.py` | ~150 | **Core.** Threaded worker pool, stop flag, page-limit guard; work items are `(url, depth, found_on)` | `CrawlEngine(config)`: `.start()`, `.stop()`, `.running`, `.events` (a `queue.Queue` of events.py objects) |
-| `report.py` | ~35 | CSV output | `CsvReport(path)`: `.add(result)`, `.close()` (incremental); `write_report(path, results)` (one-shot) |
-| `cli.py` | ~100 | argparse front end (`fetchly` entry point) | `main(argv)`. Streams rows to CSV as events arrive; Ctrl-C stops gracefully |
-| `gui/app.py` | ~200 | Tkinter front end (`fetchly-gui` entry point) | `FetchlyApp(root)`, `main()`. Settings form, live Treeview table, progress bar, Stop, Export CSV |
+| `report.py` | ~60 | CSV output for pages and issues | `CsvReport(path)`: `.add(result)`, `.close()` (incremental); `write_report(path, results)`; `write_issues(path, issues)` (sorted errors-first); `issues_path_for(report_path)` (`x.csv -> x_issues.csv`) |
+| `cli.py` | ~130 | argparse front end (`fetchly` entry point) | `main(argv)`. Streams rows to CSV as events arrive; writes `<output>_issues.csv` + prints issue summary; Ctrl-C stops gracefully |
+| `gui/app.py` | ~260 | Tkinter front end (`fetchly-gui` entry point) | `FetchlyApp(root)`, `main()`. Settings form, Pages/Issues notebook tabs, progress bar, Stop, Export (writes both CSVs) |
 
 ## Architecture rules (do not break these)
 
@@ -48,7 +50,11 @@ whether to read a file or trust this summary.
    so it automatically lands in the CSV report and `as_row()`.
 5. **Scope/filtering decisions belong in `Frontier`**, not in the engine or
    fetcher.
-6. Keep dependencies minimal. Do not add a dependency without noting it in
+6. **New audit checks go in `audit.py`** — per-page checks in `audit_page()`
+   (pure function of PageResult + ParsedPage), site-level checks emitted with
+   `CrawlFinished`. If a check needs new evidence from the HTML, collect it
+   into `ParsedPage` first.
+7. Keep dependencies minimal. Do not add a dependency without noting it in
    `HANDOFF.md` and updating `pyproject.toml`.
 
 ## How to run and verify

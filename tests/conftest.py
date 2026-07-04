@@ -17,6 +17,14 @@ SITE = {
     "page3.html": "<html><head><title>Page Three</title></head><body>end</body></html>",
     "robots.txt": "User-agent: *\nDisallow: /private/\n",
     "private/secret.html": "<html><head><title>Secret</title></head><body></body></html>",
+    "orphan.html": "<html><head><title>Orphan</title></head><body>unlinked</body></html>",
+    # {base} is replaced with the server's base URL once the port is known.
+    "sitemap.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>{base}</loc></url>
+  <url><loc>{base}page1.html</loc></url>
+  <url><loc>{base}orphan.html</loc></url>
+</urlset>""",
 }
 
 
@@ -24,14 +32,16 @@ SITE = {
 def test_site(tmp_path_factory):
     """Serve a small fixed site on an ephemeral localhost port; yield base URL."""
     root = tmp_path_factory.mktemp("site")
+    handler = partial(SimpleHTTPRequestHandler, directory=str(root))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+
     for name, content in SITE.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        path.write_text(content.replace("{base}", base))
 
-    handler = partial(SimpleHTTPRequestHandler, directory=str(root))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    yield base
     server.shutdown()

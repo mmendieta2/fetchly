@@ -81,6 +81,27 @@ images_missing_alt, error`
 you which page holds the broken link. Internal/external link counts treat the
 start domain and all its subdomains as internal.
 
+## Issues report
+
+Alongside the page report, Fetchly writes `<output>_issues.csv`
+(columns: `severity, issue_type, page_url, detail`, errors first) and shows
+the same list in the GUI's **Issues** tab. Checks:
+
+| Issue | Severity | Meaning |
+|---|---|---|
+| `broken_link` | error | 4xx/5xx page; detail names the page linking to it |
+| `fetch_error` | error | connection failure/timeout after retries |
+| `mixed_content` | error | `http://` scripts/images/styles on an `https://` page |
+| `images_missing_alt` | warning | `<img>` tags without alt text (srcs listed) |
+| `missing_title` / `missing_meta_description` | warning | empty or absent tag |
+| `missing_h1` / `multiple_h1` | warning | page has zero or 2+ `<h1>` |
+| `orphan_page` | warning | listed in `sitemap.xml` but not linked from any crawled page |
+
+The orphan check fetches `/sitemap.xml` (sitemap indexes supported) after the
+crawl finishes; it is skipped when the crawl was truncated by the page limit
+or stopped early, since that would report false orphans. Disable it with
+`--no-orphan-check`.
+
 ## Platform notes
 
 - **Windows 10/11**: python.org installers include Tkinter; the GUI sets
