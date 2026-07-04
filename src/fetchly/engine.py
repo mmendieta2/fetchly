@@ -105,10 +105,16 @@ class CrawlEngine:
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:
                 return {line.strip().lower() for line in fh if line.strip()}
-        except OSError as exc:
+        except OSError:
+            default = not config.dictionary_file
             raise ValueError(
-                f"spellcheck needs a word list: {exc} "
-                "(pass --dictionary FILE or install a system dictionary)")
+                f"Spellcheck could not read a word list at '{path}'.\n\n"
+                + ("No system dictionary is installed. Install one "
+                   "(e.g. `sudo pacman -S words`), or choose a word-list file "
+                   "in the Dictionary field / with --dictionary."
+                   if default else
+                   "Check the Dictionary path (it must be a text file with one "
+                   "word per line)."))
 
     @staticmethod
     def _parse_segment_rules(specs):

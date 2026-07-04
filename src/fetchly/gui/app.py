@@ -116,6 +116,13 @@ class FetchlyApp(ttk.Frame):
             row=10, column=2, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Checkbutton(form, text="Spellcheck", variable=self.spellcheck_var).grid(
             row=10, column=4, columnspan=2, sticky="w", pady=(6, 0))
+
+        self.dictionary_var = tk.StringVar(value="")
+        ttk.Label(form, text="Dictionary:").grid(row=11, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form, textvariable=self.dictionary_var).grid(
+            row=11, column=1, columnspan=4, sticky="ew", padx=(4, 6), pady=(6, 0))
+        ttk.Button(form, text="Browse…", command=self._pick_dictionary).grid(
+            row=11, column=5, sticky="w", pady=(6, 0))
         ttk.Checkbutton(form, text="Include subdomains", variable=self.subdomains_var).grid(
             row=2, column=2, columnspan=2, sticky="w")
         ttk.Checkbutton(form, text="Respect robots.txt", variable=self.robots_var).grid(
@@ -325,7 +332,15 @@ class FetchlyApp(ttk.Frame):
             mobile_checks=self.mobile_var.get(),
             a11y_checks=self.a11y_var.get(),
             spellcheck=self.spellcheck_var.get(),
+            dictionary_file=self.dictionary_var.get().strip(),
         )
+
+    def _pick_dictionary(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Choose a word list (one word per line)",
+            filetypes=[("Word lists", "*"), ("All files", "*.*")])
+        if path:
+            self.dictionary_var.set(path)
 
     def _start(self) -> None:
         try:
