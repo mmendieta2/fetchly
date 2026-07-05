@@ -238,11 +238,22 @@ def apply_theme(root) -> dict:
     style.map("Treeview.Heading",
               background=[("active", p["border"])])
 
-    # Scrollbars: thin, no arrows, neutral thumb.
+    # Scrollbars: a clearly visible thumb (mid-grey) sitting in a lighter
+    # channel, darkening to slate on hover. The old thumb used surface_alt on a
+    # bg trough — almost the same colour, so it was nearly invisible.
+    # gripcount=0 removes clam's centre grip (the lighter "mini-bar"); setting
+    # light/darkcolor to the thumb colour flattens its bevel so the thumb reads
+    # as one solid block.
     for orient in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
-        style.configure(orient, background=p["surface_alt"], troughcolor=p["bg"],
-                        bordercolor=p["bg"], arrowcolor=p["muted"],
-                        relief="flat", borderwidth=0)
-        style.map(orient, background=[("active", p["border"])])
+        style.configure(orient, background=p["border_strong"],
+                        troughcolor=p["surface_alt"], bordercolor=p["surface_alt"],
+                        lightcolor=p["border_strong"], darkcolor=p["border_strong"],
+                        arrowcolor=p["muted"], relief="flat", borderwidth=0,
+                        arrowsize=14, gripcount=0)
+        style.map(orient,
+                  background=[("pressed", p["muted"]), ("active", p["muted"])],
+                  lightcolor=[("pressed", p["muted"]), ("active", p["muted"])],
+                  darkcolor=[("pressed", p["muted"]), ("active", p["muted"])],
+                  arrowcolor=[("pressed", p["text"]), ("active", p["text"])])
 
     return p
