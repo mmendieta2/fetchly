@@ -79,11 +79,24 @@ python -m fetchly.cli https://example.com
 python -m fetchly.gui.app
 ```
 
+### GUI
+
+The window opens sized to show everything including the bottom status bar, and
+has three tabs — **Pages**, **Issues**, and **Graph**. While a crawl runs, an
+animated spinner and live counts (`Crawled / queued / errors / issues`) in the
+status bar make it obvious the crawl is still ongoing; it switches to a
+`Finished:` summary at the end. The **Graph** tab draws the link graph live as
+pages are discovered: the start URL is marked as the main domain (gold ring +
+domain label), and each newly crawled page emits a brief highlight ripple so you
+can see where the crawl is currently reaching. Scroll to zoom, drag to pan or
+move nodes, hover for the URL, double-click to open a page.
+
 ### CLI options
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `-o/--output` | CSV report path | `fetchly_report.csv` |
+| `-o/--output` | CSV report path | `domain-pages-YYYY-MM-DD-HHhMM.csv` |
+| `--issues-zip [FILE]` | also export a ZIP with one CSV per issue type (auto-named if FILE omitted) | — |
 | `-n/--max-pages` | page limit | 200 |
 | `-d/--max-depth` | link depth limit | 5 |
 | `-w/--workers` | concurrent workers | 8 |
@@ -126,16 +139,21 @@ start domain and all its subdomains as internal.
 
 ## Issues report
 
-Alongside the page report, Fetchly writes `<output>_issues.csv`
-(columns: `severity, issue_type, page_url, detail`, errors first) and shows
-the same list in the GUI's **Issues** tab. Checks:
+Alongside the page report, Fetchly writes an issues CSV
+(`domain-issues-YYYY-MM-DD-HHhMM.csv` by default, or `<output>_issues.csv`
+if you set a custom `-o` path; columns: `severity, issue_type, page_url,
+detail`, errors first) and shows the same list in the GUI's **Issues** tab.
+`--issues-zip` (CLI) or **Export Issues ZIP…** (GUI) additionally produces
+a ZIP archive containing one CSV per issue type, each named
+`domain-issuetype-date-time.csv`. Checks:
 
 | Issue | Severity | Meaning |
 |---|---|---|
 | `broken_link` | error | 4xx/5xx page; detail names the page linking to it |
 | `access_forbidden` | error | 401/403 — page not read (login required or bot protection; try `--user-agent`) |
 | `blocked_by_robots` | error | page not read — disallowed by robots.txt |
-| `fetch_error` | error | connection failure/timeout after retries |
+| `fetch_error` | error | connection failure/timeout after retries (detail explains the cause in plain language) |
+| `slow_page` | warning | response took over 3 s (10 s with `--render-js`, where timing includes the render) |
 | `redirect_loop` | error | URL redirects to itself (or exceeds 30 hops) |
 | `mixed_content` | error | `http://` scripts/images/styles on an `https://` page |
 | `redirect_chain` | warning | 2+ hops to reach the final URL |
@@ -173,8 +191,11 @@ or stopped early, since that would report false orphans. Disable it with
   redirect target, and word count. Use it to track audit progress or compare
   staging vs production crawls.
 - **Link graph** (`--graph out.html` or the GUI's Export Graph button): a
-  single offline HTML file with a draggable force-directed view of the crawl;
-  blue = ok, amber = redirected, red = broken; click a node to open the URL.
+  single offline HTML file with an interactive force-directed view of the
+  crawl — zoom/pan, hover a node to spotlight it and its neighbors, search
+  URLs, and filter by status (green = ok, amber = redirected, red = broken);
+  click a node to open the URL. The GUI also has a live **Graph** tab that
+  grows in real time as the crawl runs.
 - **JavaScript rendering** for React/Vue/Angular sites:
   ```bash
   pip install "fetchly[js]"
@@ -188,6 +209,72 @@ or stopped early, since that would report false orphans. Disable it with
   ```
   0 6 * * 1 /home/may/code/fetchly/.venv/bin/fetchly https://yoursite.com -q -o /home/may/audits/site-$(date +\%F).csv
   ```
+
+## Use as an LLM tool (MCP server)
+
+Fetchly ships an [MCP](https://modelcontextprotocol.io) server so an LLM agent
+can crawl a site as a **tool call** — you ask it to "audit example.com" and it
+runs the crawl itself. The fetching and analysis happen in Python (the model
+never reads raw HTML), and the tool returns a **compact summary** rather than the
+full report, so it stays cheap on tokens and works with small/local models.
+
+```bash
+pip install "fetchly[mcp]"     # adds the `fetchly-mcp` command
+```
+
+Two tools are exposed:
+
+| Tool | What it does |
+|---|---|
+| `crawl_site` | Crawl a URL and return a compact digest (page count, error/warning totals, top issue types, a broken-link sample) while writing the full pages CSV, issues CSV, and a reopenable `.fetchly.json.gz` session to disk. |
+| `crawl_report` | Page through a saved session (`kind=issues`/`pages`, filter by `severity`/`issue_type`/`url_contains`, `limit`/`offset`) **without recrawling** — so the model pulls only the rows it needs. |
+
+`crawl_site` defaults are conservative (`max_pages=50`, `max_depth=3`, robots
+respected, same-domain only). A hard page cap is enforced via
+`FETCHLY_MCP_MAX_PAGES` (default 500); output location via `FETCHLY_MCP_OUTPUT_DIR`
+(default: current directory). JS rendering, forms-login, and custom JS are
+intentionally not exposed over MCP.
+
+The client spawns `fetchly-mcp` as a local **stdio** subprocess, so the command
+must resolve in the client's environment. Unless you installed Fetchly globally,
+use the **absolute path to the venv binary** (shown below) — a bare `fetchly-mcp`
+only works if that venv is on the client's `PATH`. Find it with
+`which fetchly-mcp` inside the activated venv (here:
+`/home/may/code/fetchly/.venv/bin/fetchly-mcp`).
+
+**Claude Code** — register once (swap in your path):
+
+```bash
+claude mcp add fetchly -- /home/may/code/fetchly/.venv/bin/fetchly-mcp
+```
+
+or add to a project `.mcp.json`:
+
+```json
+{ "mcpServers": { "fetchly": {
+    "command": "/home/may/code/fetchly/.venv/bin/fetchly-mcp",
+    "env": { "FETCHLY_MCP_OUTPUT_DIR": "/home/may/crawls" } } } }
+```
+
+**opencode** (e.g. driving a local model) — add to `opencode.json`. Crawls take
+longer than opencode's default request timeout, so raise it:
+
+```json
+{ "mcp": { "fetchly": {
+    "type": "local",
+    "command": ["/home/may/code/fetchly/.venv/bin/fetchly-mcp"],
+    "enabled": true,
+    "timeout": 120000,
+    "environment": { "FETCHLY_MCP_OUTPUT_DIR": "/home/may/crawls" }
+} } }
+```
+
+Sanity-check the server before wiring it up — it should start and exit 0 (a crash
+would print a traceback):
+
+```bash
+timeout 2 /home/may/code/fetchly/.venv/bin/fetchly-mcp </dev/null; echo "exit $?"
+```
 
 ## Platform notes
 
