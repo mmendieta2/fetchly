@@ -9,8 +9,12 @@ import sys
 # add ~300 MB and still require `playwright install chromium` on the user's
 # machine. The engine imports jsfetch lazily, so the build stays clean.
 EXCLUDES = ["playwright", "pytest"]
-# Bundle vendored assets (axe-core for --a11y) alongside the package.
-DATAS = [("../src/fetchly/vendor", "fetchly/vendor")]
+# Bundle vendored assets (axe-core for --a11y) and GUI icons alongside
+# the package.
+DATAS = [
+    ("../src/fetchly/vendor", "fetchly/vendor"),
+    ("../src/fetchly/gui/assets", "fetchly/gui/assets"),
+]
 
 gui_a = Analysis(
     ["launch_gui.py"],
@@ -34,7 +38,8 @@ gui_exe = EXE(
     name="Fetchly",
     console=False,          # windowed: no console behind the GUI
     upx=False,
-    # icon="fetchly.ico",   # add when an icon asset exists
+    # Embedded exe icon is a Windows concept; PyInstaller warns elsewhere.
+    icon="fetchly.ico" if sys.platform == "win32" else None,
 )
 
 cli_exe = EXE(

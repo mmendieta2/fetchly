@@ -25,6 +25,23 @@ from .theme import FONTS, PALETTE, SPACING, apply_theme
 
 POLL_MS = 100
 
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+
+def _set_app_icon(root: tk.Tk) -> None:
+    """Set the window/taskbar icon from the bundled PNGs; the WM picks the
+    best size. Icons are optional — a stripped install just keeps Tk's
+    default feather."""
+    try:
+        icons = [
+            tk.PhotoImage(master=root, file=os.path.join(ASSETS_DIR, f"icon_{s}.png"))
+            for s in (16, 32, 64, 256)
+        ]
+        root.iconphoto(True, *icons)
+        root._fetchly_icons = icons  # keep refs or Tk garbage-collects them
+    except Exception:
+        pass
+
 
 class Tooltip:
     """Hover tooltip for a widget (Tk has no built-in one)."""
@@ -164,11 +181,18 @@ class FetchlyApp(ttk.Frame):
     def _build_header(self) -> None:
         header = ttk.Frame(self)
         header.pack(fill="x", pady=(0, SPACING["lg"]))
-        # Gold ◉ mirrors the Graph tab's main-domain marker, tying the brand
-        # mark to the crawl visualization.
-        tk.Label(header, text="◉", foreground=PALETTE["gold"],
-                 background=PALETTE["bg"],
-                 font=(FONTS["family"], 15)).pack(side="left", padx=(0, SPACING["sm"]))
+        # The Crawl Orbit mark (assets/logo.svg); falls back to the old gold ◉
+        # if the PNG asset is missing.
+        try:
+            self._logo_img = tk.PhotoImage(
+                master=self.root, file=os.path.join(ASSETS_DIR, "logo_24.png"))
+            tk.Label(header, image=self._logo_img, background=PALETTE["bg"],
+                     ).pack(side="left", padx=(0, SPACING["sm"]))
+        except Exception:
+            tk.Label(header, text="◉", foreground=PALETTE["gold"],
+                     background=PALETTE["bg"],
+                     font=(FONTS["family"], 15)).pack(side="left",
+                                                      padx=(0, SPACING["sm"]))
         ttk.Label(header, text="Fetchly", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text="Website crawler & auditor",
                   style="Subtitle.TLabel").pack(side="left", padx=(SPACING["md"], 0),
@@ -926,6 +950,7 @@ def main() -> None:
     except Exception:
         pass
     apply_theme(root)
+    _set_app_icon(root)
     FetchlyApp(root)
     root.mainloop()
 
