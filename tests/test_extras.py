@@ -70,6 +70,9 @@ class TestGraph:
         out = tmp_path / "g.html"
         assert write_graph(str(out), results) == 3
         text = out.read_text()
-        assert '"edges": [{"s": 0, "t": 1}, {"s": 1, "t": 2}]' in text
-        assert "http://" not in text.replace("http://www.sitemaps", "")  # no external refs
-        assert "https://s.com/gone" in text and "#c0392b" in text  # broken node is red
+        assert '{"source": 0, "target": 1}, {"source": 1, "target": 2}' in text
+        # No external references (the vendored bundle's w3.org XML-namespace
+        # constants are string literals, not fetched resources).
+        assert "src=" not in text.split("<body>")[0]
+        assert "http://" not in text.replace("http://www.w3.org", "")
+        assert "https://s.com/gone" in text and '"status": "broken"' in text
