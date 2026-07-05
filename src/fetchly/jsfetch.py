@@ -156,7 +156,13 @@ class JsFetcher:
                 return result, body
             return result, ""
         except Exception as exc:
-            result.error = f"{type(exc).__name__}: {exc}"
+            detail = str(exc)
+            if type(exc).__name__ == "TimeoutError":  # playwright's, not builtins'
+                detail = (f"page did not finish loading within "
+                          f"{self.config.timeout_seconds:g} s — the site may be "
+                          "slow or overloaded; try raising the Timeout setting "
+                          "(--timeout)")
+            result.error = f"{type(exc).__name__}: {detail}"
             return result, ""
         finally:
             page.close()

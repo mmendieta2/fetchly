@@ -12,6 +12,22 @@ _MAX_BODY_BYTES = 5 * 1024 * 1024
 _RETRY_STATUSES = (429, 502, 503, 504)
 
 
+def friendly_error(exc: Exception, timeout_seconds: float) -> str:
+    """Plain-language description of a fetch failure, with a hint."""
+    if isinstance(exc, requests.exceptions.Timeout):
+        return (f"server did not respond within {timeout_seconds:g} s — the site "
+                "may be slow or overloaded; try raising the Timeout setting "
+                "(--timeout)")
+    if isinstance(exc, requests.exceptions.SSLError):
+        return f"secure connection failed (SSL/TLS problem): {exc}"
+    if isinstance(exc, requests.exceptions.TooManyRedirects):
+        return "redirect loop — the page keeps redirecting"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return ("could not connect — server refused or dropped the connection "
+                "(site down, firewall, or bot protection)")
+    return str(exc)
+
+
 class Fetcher:
     def __init__(self, config: CrawlConfig):
         self.config = config
@@ -84,7 +100,10 @@ class Fetcher:
             response.close()
             return result, body
         except requests.RequestException as exc:
-            result.error = f"{type(exc).__name__}: {exc}"
+            # Class-name prefix kept: audit.py matches on it and the error CSV
+            # column stays greppable by exception type.
+            result.error = (f"{type(exc).__name__}: "
+                            f"{friendly_error(exc, self.config.timeout_seconds)}")
             return result, ""
         finally:
             result.elapsed_ms = round((time.monotonic() - started) * 1000, 1)

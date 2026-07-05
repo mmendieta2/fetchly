@@ -16,6 +16,8 @@ _MAX_DETAIL_ITEMS = 5
 TITLE_MIN, TITLE_MAX = 30, 60
 META_DESC_MIN, META_DESC_MAX = 70, 155
 THIN_CONTENT_WORDS = 200
+SLOW_PAGE_MS = 3000
+SLOW_PAGE_MS_JS = 10000  # rendered elapsed_ms includes the full JS render
 NEAR_DUP_MAX_DISTANCE = 6   # max SimHash Hamming distance to flag
 _MAX_SITE_ISSUES_PER_TYPE = 20
 
@@ -41,7 +43,8 @@ def _summarize(items: "list[str]") -> str:
     return shown + (f" (+{extra} more)" if extra > 0 else "")
 
 
-def audit_page(result: PageResult, parsed: "ParsedPage | None") -> "list[Issue]":
+def audit_page(result: PageResult, parsed: "ParsedPage | None",
+               slow_ms: int = SLOW_PAGE_MS) -> "list[Issue]":
     """Checks that can be decided from a single page."""
     issues = []
 
@@ -66,6 +69,11 @@ def audit_page(result: PageResult, parsed: "ParsedPage | None") -> "list[Issue]"
     elif result.redirect_hops == 1 and result.redirect_type == "temporary":
         issues.append(Issue(result.url, "temporary_redirect", SEVERITY_WARNING,
                             f"302/303/307 redirect to {result.redirected_to}"))
+
+    if result.elapsed_ms >= slow_ms:
+        issues.append(Issue(result.url, "slow_page", SEVERITY_WARNING,
+                            f"took {result.elapsed_ms / 1000:.1f} s to respond "
+                            f"(threshold {slow_ms / 1000:g} s)"))
 
     directives = f"{result.meta_robots} {result.x_robots_tag}"
     if "noindex" in directives:

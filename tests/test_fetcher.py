@@ -124,3 +124,35 @@ def test_connection_error_retried_and_reported():
     assert result.status_code == 0
     assert result.error
     assert body == ""
+
+
+class TestFriendlyError:
+    def test_timeout_names_the_setting(self):
+        from requests.exceptions import ReadTimeout
+        from fetchly.fetcher import friendly_error
+        msg = friendly_error(ReadTimeout("HTTPSConnectionPool(...)"), 15.0)
+        assert "did not respond within 15 s" in msg
+        assert "Timeout setting" in msg
+        assert "HTTPSConnectionPool" not in msg
+
+    def test_connection_error(self):
+        from requests.exceptions import ConnectionError
+        from fetchly.fetcher import friendly_error
+        msg = friendly_error(ConnectionError("boom"), 15.0)
+        assert "could not connect" in msg
+
+    def test_ssl_error_checked_before_connection_error(self):
+        from requests.exceptions import SSLError
+        from fetchly.fetcher import friendly_error
+        assert "SSL/TLS" in friendly_error(SSLError("bad cert"), 15.0)
+
+    def test_unknown_exception_falls_back(self):
+        from requests.exceptions import RequestException
+        from fetchly.fetcher import friendly_error
+        assert friendly_error(RequestException("odd"), 15.0) == "odd"
+
+    def test_fetch_timeout_produces_friendly_error(self, flaky_server=None):
+        # nothing listens on port 1 -> ConnectionError with friendly text
+        result, _ = make_fetcher(max_retries=0).fetch("http://127.0.0.1:1/", 0)
+        assert result.error.startswith("ConnectionError:")
+        assert "could not connect" in result.error

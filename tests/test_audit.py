@@ -222,3 +222,24 @@ class TestSitemapGeneration:
         assert "<loc>https://s.com/keep</loc>" in text
         for excluded in ("gone", "moved", "hidden", "err"):
             assert excluded not in text
+
+
+class TestSlowPage:
+    def test_slow_page_flagged(self):
+        result = ok_result()
+        result.elapsed_ms = 5000
+        issues = audit_page(result, clean_page())
+        assert issue_types(issues) == {"slow_page"}
+        assert "5.0 s" in issues[0].detail
+        assert issues[0].severity == "warning"
+
+    def test_fast_page_not_flagged(self):
+        result = ok_result()
+        result.elapsed_ms = 200
+        assert audit_page(result, clean_page()) == []
+
+    def test_custom_threshold(self):
+        result = ok_result()
+        result.elapsed_ms = 5000
+        assert audit_page(result, clean_page(), slow_ms=6000) == []
+        assert issue_types(audit_page(result, clean_page(), slow_ms=4000)) == {"slow_page"}

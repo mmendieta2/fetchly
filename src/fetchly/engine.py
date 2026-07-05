@@ -13,7 +13,8 @@ import time
 from . import events
 import re as _re
 
-from .audit import (Issue, audit_page, find_duplicates, find_hreflang_issues,
+from .audit import (SLOW_PAGE_MS, SLOW_PAGE_MS_JS, Issue, audit_page,
+                    find_duplicates, find_hreflang_issues,
                     find_near_duplicates, find_orphans)
 from .config import CrawlConfig
 from .fetcher import Fetcher
@@ -235,8 +236,10 @@ class CrawlEngine:
             self._results.append(result)
             self._stats.queued = self._work.qsize()
             snapshot = CrawlStats(**vars(self._stats))
+        slow_ms = SLOW_PAGE_MS_JS if self.config.render_js else SLOW_PAGE_MS
         self.events.put(events.PageCrawled(
-            result=result, stats=snapshot, issues=audit_page(result, parsed)))
+            result=result, stats=snapshot,
+            issues=audit_page(result, parsed, slow_ms=slow_ms)))
 
     def _apply_parsed(self, result, parsed) -> None:
         result.title = parsed.title
