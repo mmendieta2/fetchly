@@ -5,9 +5,10 @@ import queue
 import sys
 
 from . import events
-from .config import CrawlConfig
+from .config import CrawlConfig, with_scheme
 from .engine import CrawlEngine
-from .report import CsvReport, issues_path_for, write_issues
+from .report import (CsvReport, export_name, issues_path_for, summarize,
+                     write_issues, write_issues_zip)
 from .sitemap import write_sitemap
 
 
@@ -17,7 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--url-list", metavar="FILE",
                    help="Audit a fixed list of URLs (one per line) instead of crawling; "
                         "implies --all-domains and depth 0 unless overridden")
-    p.add_argument("-o", "--output", default="fetchly_report.csv", help="CSV output path")
+    p.add_argument("-o", "--output", default=None,
+                   help="CSV output path (default: domain-pages-date-time.csv)")
+    p.add_argument("--issues-zip", nargs="?", const="", metavar="FILE",
+                   help="Also export a ZIP with one CSV per issue type "
+                        "(auto-named like the other reports if FILE is omitted)")
     p.add_argument("-n", "--max-pages", type=int, default=200)
     p.add_argument("-d", "--max-depth", type=int, default=None,
                    help="Link depth limit (default 5; 0 with --url-list)")
@@ -114,7 +119,7 @@ def main(argv=None) -> int:
         parser.error("a start URL is required (or use --url-list FILE)")
 
     config = CrawlConfig(
-        start_url=args.url,
+        start_url=with_scheme(args.url),
         max_pages=args.max_pages,
         max_depth=args.max_depth if args.max_depth is not None else 5,
         seed_urls=seed_urls,
@@ -149,6 +154,14 @@ def main(argv=None) -> int:
         return 2
     finally:
         login_data.clear()  # drop credentials from memory once the session holds the cookies
+
+    from datetime import datetime
+    when = datetime.now()
+    if args.output is None:
+        args.output = export_name(config.start_url, "pages", ".csv", when)
+        issues_path = export_name(config.start_url, "issues", ".csv", when)
+    else:
+        issues_path = issues_path_for(args.output)
 
     extract_names = [rule.split("=", 1)[0].strip() for rule in args.extract]
     extract_names += [rule.split("=", 1)[0].strip() for rule in args.js_snippet]
@@ -190,8 +203,12 @@ def main(argv=None) -> int:
     finally:
         report.close()
 
-    issues_path = issues_path_for(args.output)
     write_issues(issues_path, issues)
+
+    if args.issues_zip is not None:
+        zip_path = args.issues_zip or export_name(config.start_url, "issues", ".zip", when)
+        count = write_issues_zip(zip_path, issues, config.start_url, when)
+        print(f"Issues ZIP: {zip_path} ({count} issue types)")
 
     if args.save:
         from .session_io import save_crawl
@@ -214,16 +231,13 @@ def main(argv=None) -> int:
         print(f"Graph: {args.graph} ({count} nodes)")
 
     s = finished.stats
-    errors = sum(1 for i in issues if i.severity == "error")
-    warnings = len(issues) - errors
+    summary = summarize(results, issues, s)
     print(f"\nDone: {s.crawled} pages, {s.errors} fetch errors, "
           f"{s.bytes_downloaded / 1024:.1f} KiB.")
-    print(f"Issues: {errors} errors, {warnings} warnings.")
+    print(f"Issues: {summary['issue_counts']['error']} errors, "
+          f"{summary['issue_counts']['warning']} warnings.")
     if not args.quiet:
-        by_type = {}
-        for issue in issues:
-            by_type[issue.issue_type] = by_type.get(issue.issue_type, 0) + 1
-        for issue_type, count in sorted(by_type.items(), key=lambda kv: -kv[1]):
+        for issue_type, count in summary["issue_types"].items():
             print(f"  {issue_type}: {count}")
     print(f"Reports: {args.output}, {issues_path}")
     return 0
@@ -238,11 +252,22 @@ def reexport(args) -> int:
         print(f"error: cannot open {args.open_file}: {exc}", file=sys.stderr)
         return 2
 
+    from datetime import datetime
+    when = datetime.now()
+    if args.output is None:
+        args.output = export_name(config.start_url, "pages", ".csv", when)
+        issues_path = export_name(config.start_url, "issues", ".csv", when)
+    else:
+        issues_path = issues_path_for(args.output)
+
     extract_names = [rule.split("=", 1)[0].strip() for rule in config.extract_rules]
     from .report import write_report
     write_report(args.output, results, extra_fields=extract_names)
-    issues_path = issues_path_for(args.output)
     write_issues(issues_path, issues)
+    if args.issues_zip is not None:
+        zip_path = args.issues_zip or export_name(config.start_url, "issues", ".zip", when)
+        count = write_issues_zip(zip_path, issues, config.start_url, when)
+        print(f"Issues ZIP: {zip_path} ({count} issue types)")
     if args.sitemap:
         print(f"Sitemap: {args.sitemap} ({write_sitemap(args.sitemap, results)} URLs)")
     if args.graph:

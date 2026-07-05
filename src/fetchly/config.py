@@ -3,6 +3,14 @@
 from dataclasses import dataclass, field
 
 
+def with_scheme(url: str) -> str:
+    """Prepend https:// when the user typed a bare domain like example.com."""
+    url = url.strip()
+    if url and "://" not in url:
+        return "https://" + url
+    return url
+
+
 @dataclass
 class CrawlConfig:
     start_url: str
