@@ -57,5 +57,6 @@ if sys.platform == "darwin":
     app = BUNDLE(
         gui_exe,
         name="Fetchly.app",
+        icon="fetchly.icns",
         bundle_identifier="com.fetchly.crawler",
     )
