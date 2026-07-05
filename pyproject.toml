@@ -18,10 +18,12 @@ dependencies = [
 dev = ["pytest>=8"]
 js = ["playwright>=1.40"]
 build = ["pyinstaller>=6"]
+mcp = ["mcp>=1.2"]
 
 [project.scripts]
 fetchly = "fetchly.cli:main"
 fetchly-compare = "fetchly.compare:main"
+fetchly-mcp = "fetchly.mcp_server:main"
 
 [project.gui-scripts]
 fetchly-gui = "fetchly.gui.app:main"
