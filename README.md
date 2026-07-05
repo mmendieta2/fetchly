@@ -43,35 +43,56 @@ Design rules:
 - **Politeness**: per-host robots.txt cache (fail-open), optional per-worker
   delay, identifying User-Agent, 5 MiB body cap.
 
-## Standalone app (no Python needed)
+## Build the standalone app (no Python needed to *run* it)
 
-Prebuilt, dependency-free binaries are published as GitHub Release assets:
+Fetchly ships **no prebuilt binaries**: unsigned downloads trip Windows
+SmartScreen and macOS Gatekeeper's malware warnings, and making those go
+away requires paid signing certificates. Building locally takes a few
+minutes, and a locally built app is fully trusted by your OS — the
+warnings only attach to files downloaded from the internet.
 
-| OS | Asset | Run |
-|---|---|---|
-| Windows 10/11 | `Fetchly-windows-x64.zip` | unzip → double-click `Fetchly.exe` (GUI) or `fetchly-cli.exe <url>` |
-| Linux (Arch/CachyOS) | `Fetchly-linux-x86_64.tar.gz` | `tar xzf` → `./Fetchly` or `./fetchly-cli <url>`; or `makepkg -si` with `packaging/arch/PKGBUILD` |
-| Linux (older glibc) | `Fetchly-linux-glibc-x86_64.tar.gz` | same, built on Ubuntu for wider compatibility |
+Each OS builds its own binary (PyInstaller cannot cross-compile). All
+platforms: install **Python 3.9+** first, then grab the source
+(`git clone https://github.com/mmendieta2/fetchly` or download the source
+zip from the Releases page) and run the script for your OS. The result
+lands in `packaging/dist/`: `Fetchly` (GUI) and `fetchly-cli`.
 
-Binaries are unsigned (code signing requires paid certificates): Windows
-SmartScreen → "More info" → "Run anyway". **macOS has no prebuilt app** —
-unsigned apps trip Gatekeeper's "could not verify … free of malware" wall,
-so macOS users should build from source: install Python 3, then run
-`packaging/build_macos.sh` (produces `packaging/dist/Fetchly.app` and
-`fetchly-cli`), or just use the pip install below. JavaScript rendering
-is not bundled (≈300 MB) — use the pip install below with `fetchly[js]`.
+**Windows 10/11**
+1. Install Python from https://python.org (check "Add python.exe to PATH";
+   Tk is included by default).
+2. In the source folder: `packaging\build_windows.bat`
+3. Run `packaging\dist\Fetchly.exe` (GUI) or `fetchly-cli.exe <url>`.
 
-**Building the binaries** (maintainers): PyInstaller cannot cross-compile,
-so each OS builds its own — `packaging/build_windows.bat`,
-`packaging/build_macos.sh`, `packaging/build_linux.sh` (shared spec:
-`packaging/fetchly.spec`). Pushing a `v*` tag runs
-`.github/workflows/release.yml`, which builds Windows + Linux on CI and
-attaches the assets to the release. Linux binaries link the build machine's
-glibc — build on the oldest distro you target.
+**macOS**
+1. Install Python 3 from https://python.org (includes Tk), or
+   `brew install python python-tk`.
+2. In the source folder: `bash packaging/build_macos.sh`
+3. Run `packaging/dist/Fetchly.app` (GUI) or `./packaging/dist/fetchly-cli`.
+   No Gatekeeper prompts — you built it, so it is not quarantined.
+
+**Linux**
+1. Install Python + Tk from your distro, e.g. `sudo pacman -S python tk`
+   (Arch/CachyOS) or `sudo apt install python3 python3-venv python3-tk`
+   (Debian/Ubuntu).
+2. In the source folder: `bash packaging/build_linux.sh`
+3. Run `./packaging/dist/Fetchly` (GUI) or `./packaging/dist/fetchly-cli <url>`.
+
+**Arch/CachyOS package**: `cd packaging/arch && makepkg -si` installs
+`fetchly` + `fetchly-gui` system-wide via pacman.
+
+All three scripts share `packaging/fetchly.spec` and build in an isolated
+venv (`packaging/.buildvenv`), leaving your system Python untouched.
+JavaScript rendering is not bundled into the binaries (≈300 MB); for that,
+use the pip install below with `fetchly[js]`. If you don't need a
+standalone binary at all, the plain pip install below is even simpler.
 
 ## Install & run (from source)
 
 ```bash
+# straight from GitHub, no clone needed:
+pip install git+https://github.com/mmendieta2/fetchly
+
+# or from a clone (editable):
 pip install -e .
 
 fetchly https://example.com -o report.csv -n 100   # CLI
