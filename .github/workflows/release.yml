@@ -15,9 +15,6 @@ jobs:
           - os: windows-latest
             build: packaging/build_windows.bat
             asset: Fetchly-windows-x64.zip
-          - os: macos-latest
-            build: bash packaging/build_macos.sh
-            asset: Fetchly-macos.dmg
           - os: ubuntu-latest
             build: bash packaging/build_linux.sh
             asset: Fetchly-linux-glibc-x86_64.tar.gz
@@ -40,13 +37,6 @@ jobs:
         run: Compress-Archive -Path packaging/dist/Fetchly.exe, packaging/dist/fetchly-cli.exe -DestinationPath ${{ matrix.asset }}
         shell: pwsh
 
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir dmgroot
-          cp -R packaging/dist/Fetchly.app packaging/dist/fetchly-cli dmgroot/
-          hdiutil create -volname Fetchly -srcfolder dmgroot -ov -format UDZO "${{ matrix.asset }}"
-
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tar -czf "${{ matrix.asset }}" -C packaging/dist Fetchly fetchly-cli
@@ -58,7 +48,7 @@ jobs:
           body: |
             Standalone builds — no Python required. Binaries are unsigned:
             - **Windows**: SmartScreen may warn on first run → "More info" → "Run anyway".
-            - **macOS**: right-click Fetchly.app → Open (or `xattr -dr com.apple.quarantine Fetchly.app`).
+            - **macOS**: no prebuilt app (unsigned builds trip Gatekeeper's malware warning) — build from source with `packaging/build_macos.sh`, see the README.
             - **Linux**: `tar xzf`, then `./Fetchly` (GUI) or `./fetchly-cli <url>`.
             - **Arch/CachyOS**: prefer the `Fetchly-linux-x86_64.tar.gz` asset (built on Arch) or `packaging/arch/PKGBUILD`.
 
