@@ -320,35 +320,45 @@ class FetchlyApp(ttk.Frame):
                 "several seconds per page instead of milliseconds. Enable it "
                 "only for sites that build their content with JavaScript.")
 
-        mobile_check = ttk.Checkbutton(audits, text="Mobile usability",
+        # The three audit toggles share one left-aligned frame and pack side by
+        # side with a small gap, so they read as a group instead of being
+        # stretched across the full width.
+        checks = ttk.Frame(audits)
+        checks.grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        mobile_check = ttk.Checkbutton(checks, text="Mobile usability",
                                        variable=self.mobile_var)
-        mobile_check.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        mobile_check.pack(side="left")
         Tooltip(mobile_check,
                 "Crawl with a phone viewport and flag missing viewport meta, "
                 "tiny text, and small tap targets. Needs Render JavaScript.")
-        a11y_check = ttk.Checkbutton(audits, text="Accessibility (axe)",
+        a11y_check = ttk.Checkbutton(checks, text="Accessibility (axe)",
                                      variable=self.a11y_var)
-        a11y_check.grid(row=1, column=2, columnspan=2, sticky="w", pady=(6, 0))
+        a11y_check.pack(side="left", padx=(SPACING["lg"], 0))
         Tooltip(a11y_check,
                 "Run the axe-core accessibility checker on every page and "
                 "report violations as issues. Needs Render JavaScript.")
-        spellcheck_check = ttk.Checkbutton(audits, text="Spellcheck",
+        spellcheck_check = ttk.Checkbutton(checks, text="Spellcheck",
                                            variable=self.spellcheck_var)
-        spellcheck_check.grid(row=1, column=4, columnspan=2, sticky="w", pady=(6, 0))
+        spellcheck_check.pack(side="left", padx=(SPACING["lg"], 0))
         Tooltip(spellcheck_check,
                 "Flag words in the visible text that aren't in the "
                 "dictionary. Conservative: lowercase ASCII words only.")
 
-        ttk.Label(audits, text="Dictionary:").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        dictionary_entry = ttk.Entry(audits, textvariable=self.dictionary_var)
-        dictionary_entry.grid(row=2, column=1, columnspan=4, sticky="ew",
-                              padx=(4, 6), pady=(6, 0))
+        # The dictionary controls live in their own row-spanning frame so they
+        # line up flush-left and stay adjacent, independent of the equal-width
+        # columns used by the checkboxes above.
+        dict_row = ttk.Frame(audits)
+        dict_row.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(6, 0))
+        ttk.Label(dict_row, text="Dictionary:").pack(side="left", padx=(0, 4))
+        ttk.Button(dict_row, text="Browse…",
+                   command=self._pick_dictionary).pack(side="right")
+        dictionary_entry = ttk.Entry(dict_row, textvariable=self.dictionary_var)
+        dictionary_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
         Tooltip(dictionary_entry,
                 "Word list for Spellcheck, one word per line. Defaults to the "
                 "system dictionary (/usr/share/dict/words).")
-        ttk.Button(audits, text="Browse…", command=self._pick_dictionary).grid(
-            row=2, column=5, sticky="w", pady=(6, 0))
-        audits.columnconfigure(4, weight=1)
+        # Let the full-width rows (render-js, checks, dictionary) stretch.
+        audits.columnconfigure(0, weight=1)
 
         buttons = ttk.Frame(self)
         buttons.pack(fill="x", pady=SPACING["md"])
@@ -387,7 +397,10 @@ class FetchlyApp(ttk.Frame):
             side="right")
         self.save_btn = ttk.Button(buttons, text="Save Crawl…",
                                    command=self._save_crawl, state="disabled")
-        self.save_btn.pack(side="right", padx=(0, SPACING["sm"]))
+        # Left pad matches the export group's inter-button gap so that when the
+        # window shrinks and the right group meets the left one, the Graph→Save
+        # gap is the same as the others (invisible while there's slack).
+        self.save_btn.pack(side="right", padx=(SPACING["sm"], SPACING["sm"]))
 
     def _make_tree(self, parent, headers) -> ttk.Treeview:
         tree = ttk.Treeview(parent, columns=tuple(headers), show="headings")
@@ -457,6 +470,20 @@ class FetchlyApp(ttk.Frame):
         self.graph_view = GraphView(self.notebook)
         self.notebook.add(self.graph_view, text="Graph")
 
+        self._compare_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self._compare_tab, text="Compare")
+        compare_bar = ttk.Frame(self._compare_tab)
+        compare_bar.pack(fill="x", pady=(0, SPACING["sm"]))
+        ttk.Button(compare_bar, text="Compare CSVs…",
+                   command=self._compare_crawls).pack(side="left")
+        self.compare_tree = self._make_tree(self._compare_tab, {
+            "change": ("Change", 90, False), "field": ("Field", 130, False),
+            "url": ("URL", 380, True), "before": ("Before", 190, True),
+            "after": ("After", 190, True)})
+        self._compare_empty = self._empty_state(
+            self._compare_tab,
+            "No comparison yet.\nPress  Compare CSVs…  above to diff two page reports.")
+
     def _install_context_menus(self) -> None:
         """Right-click menus: edit actions on entries, copy actions on tables."""
         button = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
@@ -476,7 +503,7 @@ class FetchlyApp(ttk.Frame):
         self._tree_menu.add_command(label="Copy Cell", command=self._copy_cell)
         self._tree_menu.add_command(label="Copy Row", command=self._copy_row)
         self._tree_menu.add_command(label="Copy URL", command=self._copy_url)
-        for tree in (self.tree, self.issues_tree):
+        for tree in (self.tree, self.issues_tree, self.compare_tree):
             tree.bind(button, self._popup_tree_menu)
 
     def _popup_entry_menu(self, event) -> None:
@@ -835,6 +862,55 @@ class FetchlyApp(ttk.Frame):
         self.status_var.set(
             f"Opened {path}: {len(self.results)} pages, {len(self.issues)} issues "
             f"(crawl of {config.start_url})")
+
+    def _compare_crawls(self) -> None:
+        """Diff two page-report CSVs and show the result in the Compare tab.
+
+        Independent of the current crawl — reads two files chosen from disk,
+        mirroring the fetchly-compare CLI.
+        """
+        old_path = filedialog.askopenfilename(
+            title="Old (baseline) page report",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not old_path:
+            return
+        new_path = filedialog.askopenfilename(
+            title="New page report",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not new_path:
+            return
+        from ..compare import load_report, diff_reports
+        try:
+            old, new = load_report(old_path), load_report(new_path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Cannot compare", str(exc))
+            return
+        diff = diff_reports(old, new)
+
+        self.compare_tree.delete(*self.compare_tree.get_children())
+        for url in diff["added"]:
+            self.compare_tree.insert("", "end", values=("Added", "", url, "", ""),
+                                     tags=(self._stripe(self.compare_tree), "ok"))
+        for url in diff["removed"]:
+            self.compare_tree.insert("", "end", values=("Removed", "", url, "", ""),
+                                     tags=(self._stripe(self.compare_tree), "broken"))
+        for url, fields in diff["changed"].items():
+            for field, (before, after) in fields.items():
+                self.compare_tree.insert(
+                    "", "end", values=("Changed", field, url, before, after),
+                    tags=(self._stripe(self.compare_tree), "warning"))
+
+        n = len(diff["added"]) + len(diff["removed"]) + len(diff["changed"])
+        if n:
+            self._compare_empty.place_forget()
+        else:
+            self._compare_empty.place(relx=0.5, rely=0.44, anchor="center")
+        compare_index = self.notebook.index(self._compare_tab)
+        self.notebook.tab(compare_index, text=f"Compare ({n})" if n else "Compare")
+        self.notebook.select(self._compare_tab)
+        self.status_var.set(
+            f"Compared: {len(old)} → {len(new)} pages · "
+            f"+{len(diff['added'])} −{len(diff['removed'])} ~{len(diff['changed'])}")
 
     def _on_close(self) -> None:
         if self.engine:

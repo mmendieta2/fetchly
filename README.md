@@ -82,7 +82,7 @@ python -m fetchly.gui.app
 ### GUI
 
 The window opens sized to show everything including the bottom status bar, and
-has three tabs — **Pages**, **Issues**, and **Graph**. While a crawl runs, an
+has four tabs — **Pages**, **Issues**, **Graph**, and **Compare**. While a crawl runs, an
 animated spinner and live counts (`Crawled / queued / errors / issues`) in the
 status bar make it obvious the crawl is still ongoing; it switches to a
 `Finished:` summary at the end. The **Graph** tab draws the link graph live as
@@ -90,6 +90,11 @@ pages are discovered: the start URL is marked as the main domain (gold ring +
 domain label), and each newly crawled page emits a brief highlight ripple so you
 can see where the crawl is currently reaching. Scroll to zoom, drag to pan or
 move nodes, hover for the URL, double-click to open a page.
+
+A fourth **Compare** tab diffs two saved page-report CSVs without recrawling:
+its **Compare CSVs…** button asks for the old (baseline) and new reports, then
+the tab lists added (green), removed (red), and changed (amber) URLs — the GUI
+equivalent of the `fetchly-compare` tool below.
 
 ### CLI options
 
