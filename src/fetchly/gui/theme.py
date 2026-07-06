@@ -99,8 +99,12 @@ def _set_fonts(root) -> None:
             pass
 
 
-def apply_theme(root) -> dict:
-    """Apply the Fetchly look to *root* and return the palette."""
+def apply_theme(root, scale: float = 1.0) -> dict:
+    """Apply the Fetchly look to *root* and return the palette.
+
+    *scale* is the UI scale relative to 96 DPI, applied to pixel-based
+    sizes only — fonts are in points and scale through ``tk scaling``.
+    """
     p = PALETTE
     _set_fonts(root)
     root.configure(background=p["bg"])
@@ -227,7 +231,8 @@ def apply_theme(root) -> dict:
     # Tables: white surface, taller rows, quiet flat headings, blue selection.
     style.configure("Treeview", background=p["surface"],
                     fieldbackground=p["surface"], foreground=p["text"],
-                    bordercolor=p["border"], borderwidth=0, rowheight=26,
+                    bordercolor=p["border"], borderwidth=0,
+                    rowheight=round(26 * scale),
                     font=(family, 10))
     style.map("Treeview",
               background=[("selected", p["select"])],

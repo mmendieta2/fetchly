@@ -171,10 +171,12 @@ class FetchlyApp(ttk.Frame):
         # Size from the actual laid-out height so the bottom status bar is
         # always visible on open, and forbid shrinking below it.
         self.update_idletasks()
+        scale = _ui_scale(root)
         min_h = self.winfo_reqheight()
-        min_w = max(760, self.winfo_reqwidth())
+        min_w = max(round(760 * scale), self.winfo_reqwidth())
         root.minsize(min_w, min_h)
-        root.geometry(f"{max(980, min_w)}x{max(640, min_h)}")
+        root.geometry(
+            f"{max(round(980 * scale), min_w)}x{max(round(640 * scale), min_h)}")
 
     # -- layout -------------------------------------------------------------
 
@@ -612,7 +614,8 @@ class FetchlyApp(ttk.Frame):
 
         win = tk.Toplevel(self.root)
         win.title("Details")
-        win.geometry("560x340")
+        scale = _ui_scale(self.root)
+        win.geometry(f"{round(560 * scale)}x{round(340 * scale)}")
         win.transient(self.root)
         text = tk.Text(win, wrap="word", padx=10, pady=10, height=12,
                        relief="flat", borderwidth=0, background=PALETTE["surface"],
@@ -942,14 +945,36 @@ class FetchlyApp(ttk.Frame):
         self.root.destroy()
 
 
-def main() -> None:
-    root = tk.Tk()
-    try:  # Better scaling on Windows HiDPI displays.
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
+def _ui_scale(root: tk.Tk) -> float:
+    """UI scale factor relative to a 96-DPI display.
+
+    Fonts are sized in points, so Tk scales them itself via ``tk scaling``
+    once the process is DPI-aware; this factor is only for values Tk treats
+    as raw pixels (table row height, window geometry).
+    """
+    try:
+        return max(1.0, float(root.tk.call("tk", "scaling")) / (96 / 72))
     except Exception:
-        pass
-    apply_theme(root)
+        return 1.0
+
+
+def main() -> None:
+    # Declare DPI awareness BEFORE tk.Tk(): Tk samples the system DPI once
+    # at init, so a late call leaves it laying out for 96 DPI — tiny text
+    # on scaled Windows displays. Level 1 (system-aware) rather than
+    # per-monitor: Tk 8.6 ignores WM_DPICHANGED, so DWM must handle
+    # cross-monitor rescaling.
+    if sys.platform == "win32":
+        try:
+            from ctypes import windll
+            try:
+                windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                windll.user32.SetProcessDPIAware()  # pre-Win8.1 fallback
+        except Exception:
+            pass
+    root = tk.Tk()
+    apply_theme(root, _ui_scale(root))
     _set_app_icon(root)
     FetchlyApp(root)
     root.mainloop()
