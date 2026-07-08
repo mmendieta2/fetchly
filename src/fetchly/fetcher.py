@@ -3,6 +3,7 @@
 import time
 
 import requests
+import urllib3
 
 from .config import CrawlConfig
 from .models import PageResult
@@ -25,6 +26,13 @@ def friendly_error(exc: Exception, timeout_seconds: float) -> str:
     if isinstance(exc, requests.exceptions.ConnectionError):
         return ("could not connect — server refused or dropped the connection "
                 "(site down, firewall, or bot protection)")
+    if isinstance(exc, urllib3.exceptions.ReadTimeoutError):
+        return (f"server did not respond within {timeout_seconds:g} s — the site "
+                "may be slow or overloaded; try raising the Timeout setting "
+                "(--timeout)")
+    if isinstance(exc, urllib3.exceptions.ProtocolError):
+        return ("connection dropped while the page body was downloading — the "
+                "server or a proxy closed the connection mid-response")
     return str(exc)
 
 
@@ -99,7 +107,10 @@ class Fetcher:
                 result.content_length = int(response.headers.get("Content-Length") or 0)
             response.close()
             return result, body
-        except requests.RequestException as exc:
+        except (requests.RequestException, urllib3.exceptions.HTTPError) as exc:
+            # urllib3 errors included: response.raw.read() bypasses requests'
+            # error wrapping, so a mid-body failure (e.g. ProtocolError on a
+            # connection reset) surfaces raw — uncaught it kills the worker.
             # Class-name prefix kept: audit.py matches on it and the error CSV
             # column stays greppable by exception type.
             result.error = (f"{type(exc).__name__}: "

@@ -1,3 +1,4 @@
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -118,6 +119,44 @@ def test_redirect_loop_reported(redirect_server):
     assert body == ""
 
 
+class TruncatedBodyHandler(BaseHTTPRequestHandler):
+    """Declares a chunked HTML body, then drops the connection mid-chunk."""
+
+    protocol_version = "HTTP/1.1"  # chunked transfer needs 1.1
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        self.wfile.write(b"400\r\n<html><body>partial")  # promises 0x400 bytes
+        self.wfile.flush()
+        # close() alone leaves the fd open (rfile/wfile still reference it);
+        # shutdown() actually sends the FIN mid-chunk.
+        self.connection.shutdown(socket.SHUT_RDWR)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def truncating_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), TruncatedBodyHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    server.shutdown()
+
+
+def test_mid_body_disconnect_reported_not_raised(truncating_server):
+    # raw.read() raises a bare urllib3 ProtocolError (requests doesn't wrap
+    # it); it must land in result.error, not escape and kill the worker.
+    result, body = make_fetcher(max_retries=0, timeout_seconds=5).fetch(
+        truncating_server, 0)
+    assert "ProtocolError" in result.error
+    assert "connection dropped" in result.error
+    assert body == ""
+
+
 def test_connection_error_retried_and_reported():
     fetcher = make_fetcher(max_retries=1)
     result, body = fetcher.fetch("http://127.0.0.1:1/", 0)  # nothing listens
@@ -145,6 +184,18 @@ class TestFriendlyError:
         from requests.exceptions import SSLError
         from fetchly.fetcher import friendly_error
         assert "SSL/TLS" in friendly_error(SSLError("bad cert"), 15.0)
+
+    def test_urllib3_protocol_error(self):
+        from urllib3.exceptions import ProtocolError
+        from fetchly.fetcher import friendly_error
+        assert "connection dropped" in friendly_error(
+            ProtocolError("Connection broken: ConnectionResetError(104)"), 15.0)
+
+    def test_urllib3_read_timeout(self):
+        from urllib3.exceptions import ReadTimeoutError
+        from fetchly.fetcher import friendly_error
+        msg = friendly_error(ReadTimeoutError(None, "http://x/", "read timed out"), 15.0)
+        assert "did not respond within 15 s" in msg
 
     def test_unknown_exception_falls_back(self):
         from requests.exceptions import RequestException
