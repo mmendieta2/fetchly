@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fetchly
+GenericName=Website Crawler
+Comment=Crawl and audit websites, producing CSV reports
+Exec=fetchly-gui
+Icon=fetchly
+Terminal=false
+Categories=Network;WebDevelopment;
+Keywords=crawler;SEO;audit;sitemap;broken links;
+StartupWMClass=Fetchly

@@ -1178,7 +1178,9 @@ def main() -> None:
                 windll.user32.SetProcessDPIAware()  # pre-Win8.1 fallback
         except Exception:
             pass
-    root = tk.Tk()
+    # className sets WM_CLASS ("fetchly", "Fetchly") so Linux launchers match
+    # the running window to the fetchly.desktop entry (StartupWMClass).
+    root = tk.Tk(className="Fetchly")
     apply_theme(root, _ui_scale(root))
     _set_app_icon(root)
     FetchlyApp(root)

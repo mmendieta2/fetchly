@@ -89,7 +89,10 @@ standalone binary at all, the plain pip install below is even simpler.
 ## Install & run (from source)
 
 ```bash
-# straight from GitHub, no clone needed:
+# recommended on Linux (isolated env + commands on PATH, no venv juggling):
+pipx install git+https://github.com/mmendieta2/fetchly
+
+# or straight from GitHub with pip, no clone needed:
 pip install git+https://github.com/mmendieta2/fetchly
 
 # or from a clone (editable):
@@ -100,6 +103,21 @@ fetchly-gui                                        # GUI
 # or without installing entry points:
 python -m fetchly.cli https://example.com
 python -m fetchly.gui.app
+```
+
+Notes for Linux: distro Pythons refuse bare `pip install` into the system
+environment (PEP 668) — use pipx (`pacman -S python-pipx` / `apt install
+pipx`) or a venv. Updating a pipx install: `pipx upgrade fetchly` picks up
+new releases (version bumps); `pipx reinstall fetchly` forces the current
+`main` snapshot. The GUI needs the distro's Tk package (`pacman -S tk` /
+`apt install python3-tk`).
+
+To add Fetchly to your application menu (Linux, user-level, works with any
+install method that put `fetchly-gui` on PATH):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmendieta2/fetchly/main/packaging/install_desktop_entry.sh | bash
+# or from a clone: ./packaging/install_desktop_entry.sh
 ```
 
 ### GUI
