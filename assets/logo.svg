@@ -4,6 +4,6 @@
   <circle cx="32" cy="34" r="15" fill="none" stroke="currentColor" stroke-width="4"/>
   <ellipse cx="32" cy="34" rx="6.5" ry="15" fill="none" stroke="currentColor" stroke-width="2.5"/>
   <line x1="17.5" y1="34" x2="46.5" y2="34" stroke="currentColor" stroke-width="2.5"/>
-  <path d="M 8 44 A 26 26 0 1 1 56 44" fill="none" stroke="#e9a13b" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="56" cy="44" r="5.5" fill="#e9a13b"/>
+  <path d="M 8 44 A 26 26 0 1 1 56 44" fill="none" stroke="#245bd0" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="56" cy="44" r="5.5" fill="#245bd0"/>
 </svg>
