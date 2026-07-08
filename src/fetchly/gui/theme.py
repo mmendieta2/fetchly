@@ -262,6 +262,10 @@ def apply_theme(root, scale: float = 1.0, mode: "str | None" = None) -> dict:
               darkcolor=[("disabled", p["border"]),
                          ("pressed", p["accent"]), ("active", p["accent"])])
 
+    # Compact square variant for small icon-ish buttons (✕, etc.); inherits
+    # everything else from TButton.
+    style.configure("Icon.TButton", padding=(6, 4))
+
     # Primary button: solid accent, white text. When disabled it stays a filled,
     # outlined button (a desaturated blue-grey) so it keeps its button shape.
     style.configure("Accent.TButton", background=p["accent"],

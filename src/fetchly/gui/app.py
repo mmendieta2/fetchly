@@ -6,6 +6,7 @@ inside CrawlEngine; this window polls engine.events every 100 ms via
 Tk's after() so every widget update happens on the main thread.
 """
 
+import csv
 import os
 import queue
 import sys
@@ -14,6 +15,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, ttk
 
+from . import prefs
 from .. import events
 from ..config import CrawlConfig, with_scheme
 from ..engine import CrawlEngine
@@ -26,6 +28,27 @@ from .theme import FONTS, PALETTE, SPACING, apply_theme, current_mode
 POLL_MS = 100
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+
+def _set_titlebar_mode(root: tk.Tk) -> None:
+    """Windows: match the native titlebar to the theme (immersive dark mode).
+
+    Tk cannot restyle the titlebar itself; DWM can, per window. No-op on
+    other platforms and on Windows builds without the attribute.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        from ctypes import byref, c_int, sizeof, windll
+        root.update_idletasks()
+        hwnd = windll.user32.GetParent(root.winfo_id())
+        value = c_int(1 if current_mode() == "dark" else 0)
+        for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (19 pre-20H1)
+            if windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attribute, byref(value), sizeof(value)) == 0:
+                break
+    except Exception:
+        pass
 
 
 def _set_app_icon(root: tk.Tk) -> None:
@@ -173,6 +196,7 @@ class FetchlyApp(ttk.Frame):
         self._build_table()
         self._build_statusbar()
         self._install_context_menus()
+        self._load_prefs()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Size from the actual laid-out height so the bottom status bar is
@@ -226,6 +250,9 @@ class FetchlyApp(ttk.Frame):
         mode = "dark" if current_mode() == "light" else "light"
         apply_theme(self.root, _ui_scale(self.root), mode=mode)
         self._restyle()
+        _set_titlebar_mode(self.root)
+        self._theme_overridden = True   # an explicit choice; persist it
+        self._save_prefs()
 
     def _restyle(self) -> None:
         """Re-apply palette colors to plain-tk widgets after a theme switch.
@@ -270,6 +297,14 @@ class FetchlyApp(ttk.Frame):
         url_entry.bind("<Return>", self._start_from_entry)
         self.url_entry = url_entry
         EntryHistory(url_entry, self.url_var)
+        self.url_clear_btn = ttk.Button(url_row, text="✕", width=2,
+                                        style="Icon.TButton", state="disabled",
+                                        command=self._clear_url)
+        self.url_clear_btn.pack(side="left", padx=(SPACING["xs"], 0))
+        Tooltip(self.url_clear_btn, "Clear the URL")
+        # Enabled only while there is something to clear.
+        self.url_var.trace_add("write", lambda *_: self.url_clear_btn.configure(
+            state="normal" if self.url_var.get() else "disabled"))
 
         self.max_pages_var = tk.StringVar(value="200")
         self.max_depth_var = tk.StringVar(value="5")
@@ -375,8 +410,8 @@ class FetchlyApp(ttk.Frame):
                              padx=(4, 12), pady=(6, 0))
         Tooltip(login_url_entry,
                 "Forms auth: this URL is POSTed once before crawling; the "
-                "session keeps the login cookies. Not available with Render "
-                "JavaScript.")
+                "session keeps the login cookies (shared with the browser "
+                "when Render JavaScript is on).")
         ttk.Label(advanced, text="Login fields:").grid(row=4, column=3, sticky="w", pady=(6, 0))
         login_fields_entry = ttk.Entry(advanced, textvariable=self.login_fields_var, show="*")
         login_fields_entry.grid(row=4, column=4, columnspan=2, sticky="ew",
@@ -569,6 +604,10 @@ class FetchlyApp(ttk.Frame):
         compare_bar.pack(fill="x", pady=(0, SPACING["sm"]))
         ttk.Button(compare_bar, text="Compare CSVs…",
                    command=self._compare_crawls).pack(side="left")
+        self.compare_export_btn = ttk.Button(compare_bar, text="Export CSV…",
+                                             command=self._export_compare,
+                                             state="disabled")
+        self.compare_export_btn.pack(side="left", padx=(SPACING["sm"], 0))
         self.compare_tree = self._make_tree(self._compare_tab, {
             "change": ("Change", 90, False), "field": ("Field", 130, False),
             "url": ("URL", 380, True), "before": ("Before", 190, True),
@@ -885,6 +924,10 @@ class FetchlyApp(ttk.Frame):
         if path:
             self.dictionary_var.set(path)
 
+    def _clear_url(self) -> None:
+        self.url_var.set("")            # via the var, so Ctrl+Z can undo it
+        self.url_entry.focus_set()
+
     def _start_from_entry(self, _event=None) -> str:
         """Enter in the Start URL box starts the crawl — ignored while a crawl
         is running or when the box is empty (a stray Enter shouldn't nag)."""
@@ -1137,6 +1180,7 @@ class FetchlyApp(ttk.Frame):
             self._compare_empty.place_forget()
         else:
             self._compare_empty.place(relx=0.5, rely=0.44, anchor="center")
+        self.compare_export_btn.configure(state="normal" if n else "disabled")
         compare_index = self.notebook.index(self._compare_tab)
         self.notebook.tab(compare_index, text=f"Compare ({n})" if n else "Compare")
         self.notebook.select(self._compare_tab)
@@ -1144,7 +1188,64 @@ class FetchlyApp(ttk.Frame):
             f"Compared: {len(old)} → {len(new)} pages · "
             f"+{len(diff['added'])} −{len(diff['removed'])} ~{len(diff['changed'])}")
 
+    def _export_compare(self) -> None:
+        """Save the Compare tab's diff rows as a CSV."""
+        rows = [self.compare_tree.item(item, "values")
+                for item in self.compare_tree.get_children()]
+        if not rows:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv", filetypes=[("CSV files", "*.csv")],
+            initialfile=export_name(with_scheme(str(rows[0][2])), "compare", ".csv"))
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(("change", "field", "url", "before", "after"))
+                writer.writerows(rows)
+        except OSError as exc:
+            self._show_error("Cannot export", str(exc))
+            return
+        self.status_var.set(f"Comparison exported: {path}")
+
+    # -- preferences ---------------------------------------------------------
+
+    # pref-file key -> StringVar/BooleanVar attribute. login_fields_var is
+    # deliberately absent: credentials are never persisted.
+    _PREF_VARS = (
+        ("start_url", "url_var"), ("max_pages", "max_pages_var"),
+        ("max_depth", "max_depth_var"), ("workers", "workers_var"),
+        ("delay", "delay_var"), ("timeout", "timeout_var"),
+        ("retries", "retries_var"), ("user_agent", "user_agent_var"),
+        ("extract", "extract_var"), ("segments", "segments_var"),
+        ("robots_file", "robots_file_var"), ("login_url", "login_url_var"),
+        ("dictionary", "dictionary_var"),
+        ("include_subdomains", "subdomains_var"), ("respect_robots", "robots_var"),
+        ("render_js", "render_js_var"), ("mobile", "mobile_var"),
+        ("a11y", "a11y_var"), ("spellcheck", "spellcheck_var"),
+    )
+
+    def _load_prefs(self) -> None:
+        stored = prefs.load()
+        for key, attr in self._PREF_VARS:
+            if key in stored:
+                try:
+                    getattr(self, attr).set(stored[key])
+                except Exception:
+                    pass  # a bad stored value falls back to the default
+        # Theme stays system-following until the user explicitly toggles.
+        self._theme_overridden = stored.get("theme") in ("light", "dark")
+
+    def _save_prefs(self) -> None:
+        stored = {key: getattr(self, attr).get()
+                  for key, attr in self._PREF_VARS}
+        if self._theme_overridden:
+            stored["theme"] = current_mode()
+        prefs.save(stored)
+
     def _on_close(self) -> None:
+        self._save_prefs()
         if self.engine:
             self.engine.stop()
         self.root.destroy()
@@ -1181,9 +1282,13 @@ def main() -> None:
     # className sets WM_CLASS ("fetchly", "Fetchly") so Linux launchers match
     # the running window to the fetchly.desktop entry (StartupWMClass).
     root = tk.Tk(className="Fetchly")
-    apply_theme(root, _ui_scale(root))
+    saved_theme = prefs.load().get("theme")
+    if saved_theme not in ("light", "dark"):
+        saved_theme = None              # follow the system preference
+    apply_theme(root, _ui_scale(root), mode=saved_theme)
     _set_app_icon(root)
     FetchlyApp(root)
+    _set_titlebar_mode(root)
     root.mainloop()
 
 

@@ -53,3 +53,9 @@ def test_site(tmp_path_factory):
     thread.start()
     yield base
     server.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_prefs(tmp_path, monkeypatch):
+    """Keep GUI preference I/O away from the developer's real config file."""
+    monkeypatch.setenv("FETCHLY_PREFS_FILE", str(tmp_path / "prefs.json"))

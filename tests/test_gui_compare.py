@@ -96,3 +96,41 @@ def test_compare_non_report_csv_shows_error(app, monkeypatch, tmp_path):
 
     assert errors and errors[0][0] == "Cannot compare"
     assert _rows(app) == []
+
+
+def test_compare_export_writes_csv(app, monkeypatch, tmp_path):
+    old = tmp_path / "old.csv"
+    new = tmp_path / "new.csv"
+    _write_csv(old, [
+        {"url": "https://s.com/a", "status_code": "200", "word_count": "100"},
+        {"url": "https://s.com/b", "status_code": "200", "word_count": "50"}])
+    _write_csv(new, [
+        {"url": "https://s.com/a", "status_code": "404", "word_count": "100"},
+        {"url": "https://s.com/c", "status_code": "200", "word_count": "80"}])
+    _run_compare(app, monkeypatch, str(old), str(new))
+    assert str(app.compare_export_btn.cget("state")) == "normal"
+
+    out = tmp_path / "diff.csv"
+    from fetchly.gui import app as app_module
+    monkeypatch.setattr(app_module.filedialog, "asksaveasfilename",
+                        lambda *a, **k: str(out))
+    app._export_compare()
+
+    import csv
+    with open(out, newline="", encoding="utf-8") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[0] == ["change", "field", "url", "before", "after"]
+    assert ["Added", "", "https://s.com/c", "", ""] in rows
+    assert ["Removed", "", "https://s.com/b", "", ""] in rows
+    assert ["Changed", "status_code", "https://s.com/a", "200", "404"] in rows
+    assert len(rows) == 4
+
+
+def test_compare_export_disabled_when_no_diff(app, monkeypatch, tmp_path):
+    csv_rows = [{"url": "https://s.com/a", "status_code": "200"}]
+    old = tmp_path / "old.csv"
+    new = tmp_path / "new.csv"
+    _write_csv(old, csv_rows)
+    _write_csv(new, csv_rows)
+    _run_compare(app, monkeypatch, str(old), str(new))
+    assert str(app.compare_export_btn.cget("state")) == "disabled"

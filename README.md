@@ -124,7 +124,10 @@ curl -fsSL https://raw.githubusercontent.com/mmendieta2/fetchly/main/packaging/i
 
 The GUI has light and dark themes: it starts in whichever mode your OS prefers
 (Windows app theme, macOS appearance, GNOME/KDE color scheme) and a
-**☾ Dark / ☀ Light** button in the top-right corner switches at any time.
+**☾ Dark / ☀ Light** button in the top-right corner switches at any time (on
+Windows the titlebar follows). Once you toggle it, your choice is remembered.
+Settings persist between launches too — the crawl form reopens as you left it
+(login credentials are never saved).
 
 The window opens sized to show everything including the bottom status bar, and
 has four tabs — **Pages**, **Issues**, **Graph**, and **Compare**. While a crawl runs, an
@@ -139,7 +142,8 @@ move nodes, hover for the URL, double-click to open a page.
 A fourth **Compare** tab diffs two saved page-report CSVs without recrawling:
 its **Compare CSVs…** button asks for the old (baseline) and new reports, then
 the tab lists added (green), removed (red), and changed (amber) URLs — the GUI
-equivalent of the `fetchly-compare` tool below.
+equivalent of the `fetchly-compare` tool below. **Export CSV…** saves the
+displayed diff as a CSV of its own.
 
 ### CLI options
 
@@ -170,7 +174,7 @@ equivalent of the `fetchly-compare` tool below.
 | `--a11y` | accessibility audit via bundled axe-core (needs `--render-js`) | off |
 | `--js-snippet NAME=FILE` | run a JS file in each rendered page; return value becomes a CSV column (repeatable; needs `--render-js`) | — |
 | `--spellcheck` + `--dictionary FILE` | flag likely misspellings in visible text (dictionary defaults to /usr/share/dict/words) | off |
-| `--login-url URL` + `--login-field K=V` | forms auth: POST once before crawling (use `K=?` to be prompted without echo; not available with `--render-js`; credentials are never saved) | — |
+| `--login-url URL` + `--login-field K=V` | forms auth: POST once before crawling (use `K=?` to be prompted without echo; works with `--render-js` too — the login cookies are shared with the browser; credentials are never saved) | — |
 
 `--url-list` is for site migrations: it fetches exactly the listed URLs
 (depth 0, any domain) and reports status/redirect/audit data for each. The

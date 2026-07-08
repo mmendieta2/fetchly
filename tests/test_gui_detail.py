@@ -150,3 +150,12 @@ def test_command_bindings_gated_to_macos(app):
     assert entry.bind("<Control-z>")
     assert entry.bind("<Control-y>")
     assert entry.bind("<Control-Shift-Z>")
+
+
+def test_url_clear_button(app):
+    assert str(app.url_clear_btn.cget("state")) == "disabled"  # empty box
+    app.url_var.set("https://example.com")
+    assert str(app.url_clear_btn.cget("state")) == "normal"
+    app._clear_url()
+    assert app.url_var.get() == ""
+    assert str(app.url_clear_btn.cget("state")) == "disabled"
