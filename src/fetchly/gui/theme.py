@@ -11,14 +11,18 @@ Everything here is pure stdlib Tk — no extra dependencies. Call
 import :data:`PALETTE` and :data:`FONTS` so the whole app shares one look.
 """
 
+import os
+import subprocess
+import sys
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
-# -- palette --------------------------------------------------------------
-# A soft, cool light theme. Kept in one dict so colors are referenced by
-# meaning (surface, accent, …) instead of scattered hex literals.
-PALETTE = {
+# -- palettes -------------------------------------------------------------
+# Two palettes with identical keys so colors are referenced by meaning
+# (surface, accent, …) instead of scattered hex literals. LIGHT is the soft,
+# cool theme the GUI shipped with; DARK is its slate-night counterpart.
+LIGHT = {
     "bg": "#e4e8ee",          # window background (slightly deep to cut glare)
     "surface": "#fbfcfe",     # entries, tables, cards (off-white, not stark)
     "surface_alt": "#e9edf2",  # striped rows, headings, hovers
@@ -30,6 +34,9 @@ PALETTE = {
     "accent": "#245bd0",      # primary action, focus, selection accent
     "accent_hover": "#1f4fbb",
     "accent_active": "#1a44a3",
+    "accent_disabled_bg": "#b6c1d3",      # disabled primary button fill
+    "accent_disabled_fg": "#54607a",      # …and its text
+    "accent_disabled_border": "#9aa6bd",  # …and its outline
     "on_accent": "#ffffff",
     "select": "#cfe0fb",      # table row selection background
     "error": "#b23025",       # error rows / severity (text-tuned deep red)
@@ -45,6 +52,83 @@ PALETTE = {
     "status_redirect": "#fab219",  # redirected pages (graph "redirect")
     "status_broken": "#d03b3b",    # 4xx/5xx / errors (graph "broken")
 }
+
+DARK = {
+    "bg": "#181d26",
+    "surface": "#242b36",
+    "surface_alt": "#2c3442",
+    "border": "#3b4554",
+    "border_strong": "#5f6d83",
+    "text": "#e8ecf3",
+    "muted": "#a7b2c3",
+    "disabled_fg": "#66738a",
+    "accent": "#487fe8",      # lifted a step so it carries on dark surfaces
+    "accent_hover": "#5b8dec",
+    "accent_active": "#3a70da",
+    "accent_disabled_bg": "#33415c",
+    "accent_disabled_fg": "#8291ac",
+    "accent_disabled_border": "#3d4c6b",
+    "on_accent": "#ffffff",
+    "select": "#31456b",
+    "error": "#e36e63",
+    "error_bg": "#41282b",
+    "warning": "#d8a544",
+    "warning_bg": "#3c3323",
+    "canvas": "#1e242e",
+    "gold": "#e0a800",
+    "status_ok": "#45c465",        # status hues brightened for dark surfaces
+    "status_redirect": "#fab219",
+    "status_broken": "#e15f5f",
+}
+
+# The ACTIVE palette. Other modules import this dict and read it at draw
+# time; apply_theme() mutates it IN PLACE so those references stay valid
+# across a light/dark switch. Never rebind the name.
+PALETTE = dict(LIGHT)
+
+_MODE = "light"
+
+
+def current_mode() -> str:
+    """The mode last applied by apply_theme(): 'light' or 'dark'."""
+    return _MODE
+
+
+def detect_system_mode() -> str:
+    """Best-effort read of the OS light/dark preference; defaults to light."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return "light" if value else "dark"
+        if sys.platform == "darwin":
+            out = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                                 capture_output=True, text=True, timeout=2)
+            return "dark" if "dark" in out.stdout.lower() else "light"
+        # Linux: GNOME's setting first (present on most desktops), then KDE.
+        try:
+            out = subprocess.run(
+                ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                capture_output=True, text=True, timeout=2)
+            if out.returncode == 0:
+                if "prefer-dark" in out.stdout:
+                    return "dark"
+                if "prefer-light" in out.stdout:
+                    return "light"
+        except OSError:
+            pass
+        kdeglobals = os.path.expanduser("~/.config/kdeglobals")
+        if os.path.exists(kdeglobals):
+            with open(kdeglobals, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.lower().startswith("colorscheme="):
+                        return "dark" if "dark" in line.lower() else "light"
+    except Exception:
+        pass
+    return "light"
 
 # One vertical/horizontal rhythm for the whole GUI, referenced by name so
 # padding is consistent instead of ad-hoc per widget.
@@ -101,12 +185,22 @@ def _set_fonts(root) -> None:
             pass
 
 
-def apply_theme(root, scale: float = 1.0) -> dict:
+def apply_theme(root, scale: float = 1.0, mode: "str | None" = None) -> dict:
     """Apply the Fetchly look to *root* and return the palette.
 
     *scale* is the UI scale relative to 96 DPI, applied to pixel-based
     sizes only — fonts are in points and scale through ``tk scaling``.
+    *mode* is "light" or "dark"; None follows the system preference.
+    Safe to call again on the same root to switch modes — ttk widgets
+    restyle themselves; plain-tk widgets need their colors re-applied by
+    the caller (see FetchlyApp._restyle).
     """
+    global _MODE
+    if mode is None:
+        mode = detect_system_mode()
+    _MODE = mode
+    PALETTE.clear()
+    PALETTE.update(DARK if mode == "dark" else LIGHT)
     p = PALETTE
     _set_fonts(root)
     root.configure(background=p["bg"])
@@ -175,29 +269,39 @@ def apply_theme(root, scale: float = 1.0) -> dict:
                     lightcolor=p["accent"], darkcolor=p["accent"],
                     relief="flat", borderwidth=1, padding=(16, 7), font=bold)
     style.map("Accent.TButton",
-              background=[("disabled", "#b6c1d3"),
+              background=[("disabled", p["accent_disabled_bg"]),
                           ("pressed", p["accent_active"]),
                           ("active", p["accent_hover"])],
-              foreground=[("disabled", "#54607a")],
-              bordercolor=[("disabled", "#9aa6bd"),
+              foreground=[("disabled", p["accent_disabled_fg"])],
+              bordercolor=[("disabled", p["accent_disabled_border"]),
                            ("pressed", p["accent_active"]),
                            ("active", p["accent_hover"])],
-              lightcolor=[("disabled", "#b6c1d3"),
+              lightcolor=[("disabled", p["accent_disabled_bg"]),
                           ("pressed", p["accent_active"]),
                           ("active", p["accent_hover"])],
-              darkcolor=[("disabled", "#b6c1d3"),
+              darkcolor=[("disabled", p["accent_disabled_bg"]),
                          ("pressed", p["accent_active"]),
                          ("active", p["accent_hover"])])
 
     style.configure("TCheckbutton", background=p["bg"], foreground=p["text"],
                     focusthickness=0, padding=2, indicatorforeground=p["on_accent"],
-                    indicatorbackground=p["surface"], bordercolor=p["border"])
+                    indicatorbackground=p["surface"], bordercolor=p["border"],
+                    upperbordercolor=p["border_strong"],
+                    lowerbordercolor=p["border_strong"])
     style.map("TCheckbutton",
               background=[("active", p["bg"])],
               indicatorbackground=[("selected", p["accent"]),
                                    ("active", p["surface_alt"])],
               bordercolor=[("selected", p["accent"])],
+              upperbordercolor=[("focus", p["accent"])],
+              lowerbordercolor=[("focus", p["accent"])],
               foreground=[("disabled", p["muted"])])
+    # Keyboard focus shows on the indicator box (accent border, mapped above)
+    # instead of clam's ring hugging the label text, which looked scrappy.
+    style.layout("TCheckbutton", [
+        ("Checkbutton.padding", {"sticky": "nswe", "children": [
+            ("Checkbutton.indicator", {"side": "left", "sticky": ""}),
+            ("Checkbutton.label", {"sticky": "nswe"})]})])
 
     # Notebook: the client area is a bordered panel; tabs are grey chips with
     # the active one raised to white and marked by a themed accent underline
@@ -207,15 +311,18 @@ def apply_theme(root, scale: float = 1.0) -> dict:
     normal_img = _tab_image(root, p["surface_alt"])
     hover_img = _tab_image(root, p["border"])
     sel_img = _tab_image(root, p["surface"], p["accent"], uh=uh)
+    # One element per mode: an element's images are frozen at creation, so a
+    # theme switch points the tab layout at the other mode's element instead.
+    tab_element = f"Fetchly.Tab.{mode}"
     try:
-        style.element_create("Fetchly.Tab", "image", normal_img,
+        style.element_create(tab_element, "image", normal_img,
                              ("selected", sel_img),
                              ("active", "!selected", hover_img),
                              border=(2, 2, 2, uh), sticky="nswe")
     except tk.TclError:
         pass  # element persists across repeat apply_theme() calls
     style.layout("TNotebook.Tab", [
-        ("Fetchly.Tab", {"sticky": "nswe", "children": [
+        (tab_element, {"sticky": "nswe", "children": [
             ("Notebook.padding", {"side": "top", "sticky": "nswe", "children": [
                 ("Notebook.label", {"side": "top", "sticky": ""})]})]})])
     style.configure("TNotebook", background=p["bg"], borderwidth=1,

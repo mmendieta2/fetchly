@@ -21,7 +21,7 @@ from ..report import (export_name, issues_path_for, write_issues,
                       write_issues_zip, write_report)
 from ..sitemap import write_sitemap
 from ..viz import _status
-from .theme import FONTS, PALETTE, SPACING, apply_theme
+from .theme import FONTS, PALETTE, SPACING, apply_theme, current_mode
 
 POLL_MS = 100
 
@@ -68,8 +68,9 @@ class Tooltip:
         self._tip = tk.Toplevel(self.widget)
         self._tip.wm_overrideredirect(True)
         self._tip.wm_geometry(f"+{x}+{y}")
+        # Inverted colors (text-on-bg) so the tip stands out in either mode.
         tk.Label(self._tip, text=self.text, justify="left", wraplength=360,
-                 background=PALETTE["text"], foreground="#ffffff",
+                 background=PALETTE["text"], foreground=PALETTE["bg"],
                  font=(FONTS["family"], 9), relief="flat", borderwidth=0,
                  padx=8, pady=6).pack()
 
@@ -190,21 +191,70 @@ class FetchlyApp(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill="x", pady=(0, SPACING["lg"]))
         # The Crawl Orbit mark (assets/logo.svg); falls back to the old gold ◉
-        # if the PNG asset is missing.
+        # if the PNG asset is missing. The ink color differs per theme mode.
         try:
             self._logo_img = tk.PhotoImage(
-                master=self.root, file=os.path.join(ASSETS_DIR, "logo_24.png"))
-            tk.Label(header, image=self._logo_img, background=PALETTE["bg"],
-                     ).pack(side="left", padx=(0, SPACING["sm"]))
+                master=self.root,
+                file=os.path.join(ASSETS_DIR, self._logo_file()))
+            self._logo_label = tk.Label(header, image=self._logo_img,
+                                        background=PALETTE["bg"])
+            self._logo_is_image = True
         except Exception:
-            tk.Label(header, text="◉", foreground=PALETTE["gold"],
-                     background=PALETTE["bg"],
-                     font=(FONTS["family"], 15)).pack(side="left",
-                                                      padx=(0, SPACING["sm"]))
+            self._logo_label = tk.Label(header, text="◉",
+                                        foreground=PALETTE["gold"],
+                                        background=PALETTE["bg"],
+                                        font=(FONTS["family"], 15))
+            self._logo_is_image = False
+        self._logo_label.pack(side="left", padx=(0, SPACING["sm"]))
         ttk.Label(header, text="Fetchly", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text="Website crawler & auditor",
                   style="Subtitle.TLabel").pack(side="left", padx=(SPACING["md"], 0),
                                                 pady=(SPACING["xs"] + 4, 0))
+        self.theme_btn = ttk.Button(header, text=self._theme_btn_text(),
+                                    command=self._toggle_theme)
+        self.theme_btn.pack(side="right")
+
+    @staticmethod
+    def _logo_file() -> str:
+        return "logo_24_dark.png" if current_mode() == "dark" else "logo_24.png"
+
+    @staticmethod
+    def _theme_btn_text() -> str:
+        return "☾  Dark" if current_mode() == "light" else "☀  Light"
+
+    def _toggle_theme(self) -> None:
+        mode = "dark" if current_mode() == "light" else "light"
+        apply_theme(self.root, _ui_scale(self.root), mode=mode)
+        self._restyle()
+
+    def _restyle(self) -> None:
+        """Re-apply palette colors to plain-tk widgets after a theme switch.
+
+        ttk widgets follow the re-applied ttk theme automatically; everything
+        that took a PALETTE color at build time is refreshed here.
+        """
+        self.theme_btn.configure(text=self._theme_btn_text())
+        if self._logo_is_image:
+            try:
+                self._logo_img = tk.PhotoImage(
+                    master=self.root,
+                    file=os.path.join(ASSETS_DIR, self._logo_file()))
+                self._logo_label.configure(image=self._logo_img)
+            except Exception:
+                pass
+        else:
+            self._logo_label.configure(foreground=PALETTE["gold"])
+        self._logo_label.configure(background=PALETTE["bg"])
+        for tree in (self.tree, self.issues_tree, self.compare_tree):
+            self._tag_tree(tree)
+        for label in (self._pages_empty, self._issues_empty,
+                      self._compare_empty):
+            label.configure(background=PALETTE["surface"],
+                            foreground=PALETTE["muted"])
+        self._spinner.configure(foreground=PALETTE["accent"])
+        for menu in (self._entry_menu, self._tree_menu):
+            self._style_menu(menu)
+        self.graph_view.restyle()
 
     def _build_form(self) -> None:
         form = ttk.LabelFrame(self, text="Crawl settings", padding=8)
@@ -445,8 +495,16 @@ class FetchlyApp(ttk.Frame):
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
-        # Striping (background only) and severity/status cues (foreground only)
-        # are separate options, so a row can safely carry one of each.
+        self._tag_tree(tree)
+        return tree
+
+    @staticmethod
+    def _tag_tree(tree) -> None:
+        """(Re-)apply the palette to a result table's row tags.
+
+        Striping (background only) and severity/status cues (foreground only)
+        are separate options, so a row can safely carry one of each.
+        """
         tree.tag_configure("odd", background=PALETTE["surface"])
         tree.tag_configure("even", background=PALETTE["surface_alt"])
         tree.tag_configure("error", foreground=PALETTE["error"])
@@ -454,7 +512,6 @@ class FetchlyApp(ttk.Frame):
         tree.tag_configure("ok", foreground=PALETTE["status_ok"])
         tree.tag_configure("redirect", foreground=PALETTE["status_redirect"])
         tree.tag_configure("broken", foreground=PALETTE["status_broken"])
-        return tree
 
     @staticmethod
     def _stripe(tree) -> str:
@@ -526,6 +583,7 @@ class FetchlyApp(ttk.Frame):
 
         self._entry_target = None
         self._entry_menu = tk.Menu(self.root, tearoff=0)
+        self._style_menu(self._entry_menu)
         self._entry_menu.add_command(label="Cut", command=lambda: self._entry_event("<<Cut>>"))
         self._entry_menu.add_command(label="Copy", command=lambda: self._entry_event("<<Copy>>"))
         self._entry_menu.add_command(label="Paste", command=lambda: self._entry_event("<<Paste>>"))
@@ -535,12 +593,19 @@ class FetchlyApp(ttk.Frame):
 
         self._tree_target = None
         self._tree_menu = tk.Menu(self.root, tearoff=0)
+        self._style_menu(self._tree_menu)
         self._tree_menu.add_command(label="View Details", command=self._show_issue_detail)
         self._tree_menu.add_command(label="Copy Cell", command=self._copy_cell)
         self._tree_menu.add_command(label="Copy Row", command=self._copy_row)
         self._tree_menu.add_command(label="Copy URL", command=self._copy_url)
         for tree in (self.tree, self.issues_tree, self.compare_tree):
             tree.bind(button, self._popup_tree_menu)
+
+    @staticmethod
+    def _style_menu(menu) -> None:
+        menu.configure(background=PALETTE["surface"], foreground=PALETTE["text"],
+                       activebackground=PALETTE["accent"],
+                       activeforeground=PALETTE["on_accent"])
 
     def _popup_entry_menu(self, event) -> None:
         self._entry_target = event.widget

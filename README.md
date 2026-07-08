@@ -104,6 +104,10 @@ python -m fetchly.gui.app
 
 ### GUI
 
+The GUI has light and dark themes: it starts in whichever mode your OS prefers
+(Windows app theme, macOS appearance, GNOME/KDE color scheme) and a
+**☾ Dark / ☀ Light** button in the top-right corner switches at any time.
+
 The window opens sized to show everything including the bottom status bar, and
 has four tabs — **Pages**, **Issues**, **Graph**, and **Compare**. While a crawl runs, an
 animated spinner and live counts (`Crawled / queued / errors / issues`) in the

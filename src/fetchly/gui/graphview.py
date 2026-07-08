@@ -29,11 +29,21 @@ HEAT_TICKS = 150         # how long a touched node keeps simulating
 FULL_SIM_LIMIT = 300     # up to here every node stays hot
 PHYSICS_LIMIT = 1000     # above here new nodes are just placed, no physics
 
-BG = PALETTE["canvas"]      # graph canvas background; node outlines blend into it
 ROOT_OUTLINE = "#e0a800"    # gold ring marking the start-URL / main-domain node
 GLOW_COLOR = "#1f8fff"      # activity ripple on just-crawled nodes (not a status hue)
 GLOW_TICKS = 24             # ripple lifetime, in glow ticks
 GLOW_MS = 55                # ripple tick interval
+
+# Palette lookups happen at draw time (not import time) so the graph follows
+# a light/dark theme switch; restyle() recolors items already on the canvas.
+
+
+def _bg():
+    return PALETTE["canvas"]   # canvas background; node outlines blend into it
+
+
+def _edge_color():
+    return PALETTE["border"]
 
 
 def spawn_position(parent, k):
@@ -112,13 +122,17 @@ class GraphView(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill="x", padx=6, pady=(6, 2))
         self._domain_var = tk.StringVar(value="")
-        tk.Label(header, text="◉", fg=ROOT_OUTLINE, bg=PALETTE["bg"]).pack(side="left")
+        self._legend_marks = []
+        root_dot = tk.Label(header, text="◉", fg=ROOT_OUTLINE, bg=PALETTE["bg"])
+        root_dot.pack(side="left")
+        self._legend_marks.append(root_dot)
         ttk.Label(header, textvariable=self._domain_var,
                   font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(2, 14))
         self._count_vars = {}
         for status, color in STATUS_COLORS.items():
             dot = tk.Label(header, text="●", fg=color, bg=PALETTE["bg"])
             dot.pack(side="left")
+            self._legend_marks.append(dot)
             var = tk.StringVar(value=f"{status} 0")
             ttk.Label(header, textvariable=var).pack(side="left", padx=(0, 10))
             self._count_vars[status] = var
@@ -126,7 +140,7 @@ class GraphView(ttk.Frame):
         ttk.Label(header, text="scroll: zoom · drag: pan/move · "
                   "double-click: open").pack(side="right", padx=8)
 
-        self.canvas = tk.Canvas(self, background=BG, highlightthickness=0)
+        self.canvas = tk.Canvas(self, background=_bg(), highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self._readout = tk.StringVar()
         ttk.Label(self, textvariable=self._readout, font=("TkFixedFont", 9)
@@ -220,7 +234,7 @@ class GraphView(ttk.Frame):
             self._domain_var.set(urlparse(result.url).netloc or result.url)
 
         if pidx is not None:
-            line = self.canvas.create_line(0, 0, 0, 0, fill="#d8d8d8")
+            line = self.canvas.create_line(0, 0, 0, 0, fill=_edge_color())
             self.canvas.tag_lower(line)
             self.edges.append((pidx, idx, line))
             self._edge_by_line[line] = (pidx, idx)
@@ -228,15 +242,15 @@ class GraphView(ttk.Frame):
             node["lines"].append(line)
             parent["deg"] += 1
             self._resize_oval(pidx)
-        outline, width = (ROOT_OUTLINE, 3) if is_root else (BG, 1)
+        outline, width = (ROOT_OUTLINE, 3) if is_root else (_bg(), 1)
         oval = self.canvas.create_oval(0, 0, 0, 0, fill=STATUS_COLORS[status],
                                        outline=outline, width=width)
         node["oval"] = oval
         self._item_node[oval] = idx
         if is_root:
             self._root_label = self.canvas.create_text(
-                0, 0, text=self._domain_var.get(), anchor="s", fill="#333",
-                font=("TkDefaultFont", 10, "bold"))
+                0, 0, text=self._domain_var.get(), anchor="s",
+                fill=PALETTE["text"], font=("TkDefaultFont", 10, "bold"))
         self._place(idx)
         if glow:
             self._start_glow(idx)
@@ -306,7 +320,7 @@ class GraphView(ttk.Frame):
         sx, sy = self._screen(n["x"], n["y"])
         r = node_radius(n["deg"]) * math.sqrt(self._zoom_level) + 4 + (1 - frac) * 14
         self.canvas.coords(item, sx - r, sy - r, sx + r, sy + r)
-        self.canvas.itemconfigure(item, outline=_mix(GLOW_COLOR, BG, frac),
+        self.canvas.itemconfigure(item, outline=_mix(GLOW_COLOR, _bg(), frac),
                                   width=max(1.0, 2.5 * frac + 0.5))
 
     def _glow_tick(self):
@@ -464,7 +478,7 @@ class GraphView(ttk.Frame):
         # un-highlight previous hover
         if self._hover is not None and self._hover < len(self.nodes):
             for line in self.nodes[self._hover]["lines"]:
-                self.canvas.itemconfigure(line, fill="#d8d8d8", width=1)
+                self.canvas.itemconfigure(line, fill=_edge_color(), width=1)
         for item in self._label_items:
             self.canvas.delete(item)
         self._label_items = ()
@@ -477,14 +491,35 @@ class GraphView(ttk.Frame):
         self._readout.set(f"{n['status']} — {n['url']}")
         self.canvas.configure(cursor="hand2")
         for line in n["lines"]:
-            self.canvas.itemconfigure(line, fill="#555555", width=2)
+            self.canvas.itemconfigure(line, fill=PALETTE["muted"], width=2)
             self.canvas.tag_raise(line)
             self.canvas.tag_raise(n["oval"])
         sx, sy = self._screen(n["x"], n["y"])
         r = node_radius(n["deg"]) * math.sqrt(self._zoom_level)
         text = self.canvas.create_text(sx + r + 4, sy, text=n["label"],
-                                       anchor="w", font=("TkDefaultFont", 9))
+                                       anchor="w", fill=PALETTE["text"],
+                                       font=("TkDefaultFont", 9))
         box = self.canvas.create_rectangle(self.canvas.bbox(text),
-                                           fill="#ffffff", outline="#cccccc")
+                                           fill=PALETTE["surface"],
+                                           outline=PALETTE["border"])
         self.canvas.tag_raise(text, box)
         self._label_items = (box, text)
+
+    def restyle(self):
+        """Re-apply palette colors after a light/dark theme switch."""
+        self.canvas.configure(background=_bg())
+        for mark in self._legend_marks:
+            mark.configure(bg=PALETTE["bg"])
+        for line in self._edge_by_line:
+            self.canvas.itemconfigure(line, fill=_edge_color(), width=1)
+        self._hover = None                       # hover colors were reset above
+        for item in self._label_items:
+            self.canvas.delete(item)
+        self._label_items = ()
+        for oval, idx in self._item_node.items():
+            if idx != self._root_idx:
+                self.canvas.itemconfigure(oval, outline=_bg())
+        if self._root_label is not None:
+            self.canvas.itemconfigure(self._root_label, fill=PALETTE["text"])
+        if self._empty_item is not None:
+            self.canvas.itemconfigure(self._empty_item, fill=PALETTE["muted"])
