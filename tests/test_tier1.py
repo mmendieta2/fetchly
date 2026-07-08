@@ -233,7 +233,5 @@ class TestFormsAuth:
         with pytest.raises(RuntimeError, match="login"):
             Fetcher(config)
 
-    def test_render_js_with_login_rejected(self, test_site):
-        with pytest.raises(ValueError, match="forms auth"):
-            CrawlEngine(CrawlConfig(start_url=test_site, render_js=True,
-                                    login_url="https://s.com/login"))
+    # JS-mode forms auth is exercised end-to-end in test_jsfetch.py
+    # (test_js_login_cookie_reaches_browser); the old rejection is gone.

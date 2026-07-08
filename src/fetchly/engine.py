@@ -41,8 +41,6 @@ class CrawlEngine:
                 raise ValueError(f"{name} require JS rendering (--render-js)")
 
         if config.render_js:
-            if config.login_url:
-                raise ValueError("forms authentication is not yet supported with JS rendering")
             from .jsfetch import JsFetcher  # deferred: optional playwright dependency
             self._fetcher = JsFetcher(config, snippets=self._load_snippets(config),
                                       axe_source=self._load_axe(config))

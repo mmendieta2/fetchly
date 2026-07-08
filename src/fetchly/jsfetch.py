@@ -65,6 +65,11 @@ class JsFetcher:
         # Plain HTTP session for non-rendered fetches (robots.txt, sitemap.xml).
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": config.user_agent})
+        if config.login_url:
+            # Forms auth happens over plain HTTP before the browser starts;
+            # the render thread copies the session cookies into the context.
+            from .fetcher import login
+            login(self.session, config)
 
         self._requests: "queue.Queue" = queue.Queue()
         self._init_error = None
@@ -100,6 +105,9 @@ class JsFetcher:
                                     device_scale_factor=3, is_mobile=True,
                                     has_touch=True)
             context = browser.new_context(**context_args)
+            cookies = [self._as_pw_cookie(c) for c in self.session.cookies]
+            if cookies:
+                context.add_cookies(cookies)
         except Exception as exc:
             self._init_error = exc
             self._ready.set()
@@ -123,6 +131,17 @@ class JsFetcher:
                 closer()
             except Exception:
                 pass
+
+    @staticmethod
+    def _as_pw_cookie(cookie) -> dict:
+        """A requests cookie as a Playwright add_cookies() dict."""
+        out = {"name": cookie.name, "value": cookie.value,
+               "domain": cookie.domain, "path": cookie.path or "/"}
+        if cookie.expires:
+            out["expires"] = float(cookie.expires)
+        if cookie.secure:
+            out["secure"] = True
+        return out
 
     def _render(self, context, url: str, depth: int) -> "tuple[PageResult, str]":
         result = PageResult(url=url, depth=depth)

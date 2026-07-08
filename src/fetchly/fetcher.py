@@ -36,6 +36,22 @@ def friendly_error(exc: Exception, timeout_seconds: float) -> str:
     return str(exc)
 
 
+def login(session: requests.Session, config: CrawlConfig) -> None:
+    """Forms auth: POST the login form once; cookies persist in the session.
+
+    Shared by Fetcher and JsFetcher (which copies the resulting cookies into
+    its browser context).
+    """
+    try:
+        response = session.post(config.login_url, data=config.login_data,
+                                timeout=config.timeout_seconds)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"login request to {config.login_url} failed: {exc}")
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"login to {config.login_url} returned HTTP {response.status_code}")
+
+
 class Fetcher:
     def __init__(self, config: CrawlConfig):
         self.config = config
@@ -45,19 +61,7 @@ class Fetcher:
             "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         })
         if config.login_url:
-            self._login()
-
-    def _login(self) -> None:
-        """Forms auth: POST the login form once; cookies persist in the session."""
-        try:
-            response = self.session.post(
-                self.config.login_url, data=self.config.login_data,
-                timeout=self.config.timeout_seconds)
-        except requests.RequestException as exc:
-            raise RuntimeError(f"login request to {self.config.login_url} failed: {exc}")
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"login to {self.config.login_url} returned HTTP {response.status_code}")
+            login(self.session, config)
 
     def fetch(self, url: str, depth: int) -> "tuple[PageResult, str]":
         """Fetch with retries on transient failures; return (result, html_body).

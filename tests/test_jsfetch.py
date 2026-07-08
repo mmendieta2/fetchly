@@ -68,3 +68,52 @@ def test_render_js_through_engine(test_site):
     assert r.error == ""
     # word_count comes from the rendered DOM, so the injected text counts
     assert r.word_count >= 1
+
+
+@pytest.mark.skipif(not playwright_available(), reason="playwright not installed")
+def test_js_login_cookie_reaches_browser():
+    """Forms auth in JS mode: the login cookie obtained over plain HTTP must
+    be carried by Chromium, or the cookie-gated page below returns 403."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from fetchly.jsfetch import JsFetcher
+
+    class GatedHandler(BaseHTTPRequestHandler):
+        logins = []
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            type(self).logins.append(self.rfile.read(length).decode())
+            self.send_response(200)
+            self.send_header("Set-Cookie", "session=abc123")
+            self.end_headers()
+
+        def do_GET(self):
+            body = b"<html><head><title>in</title></head><body>member area</body></html>"
+            code = 200 if "session=abc123" in self.headers.get("Cookie", "") else 403
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), GatedHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    fetcher = None
+    try:
+        fetcher = JsFetcher(CrawlConfig(
+            start_url=base + "/", render_js=True,
+            login_url=base + "/login",
+            login_data={"user": "u", "password": "p"}))
+        assert GatedHandler.logins and "password=p" in GatedHandler.logins[0]
+        result, body = fetcher.fetch(base + "/members", 0)
+        assert result.status_code == 200
+        assert "member area" in body
+    finally:
+        if fetcher is not None:
+            fetcher.close()
+        server.shutdown()
