@@ -12,7 +12,7 @@ import sys
 import time
 import tkinter as tk
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 
 from .. import events
 from ..config import CrawlConfig, with_scheme
@@ -104,10 +104,16 @@ class EntryHistory:
         self._grew = True
         self._group_open = False
         var.trace_add("write", self._on_write)
-        for seq in ("<Control-z>", "<Command-z>"):
+        # <Command-…> only on macOS: on Windows Tk the Command modifier does
+        # not exist, so the binding degrades to the bare key — <Command-y>
+        # fired on a plain "y" keypress and its "break" ate the letter.
+        aqua = entry.tk.call("tk", "windowingsystem") == "aqua"
+        undo_seqs = ["<Control-z>"] + (["<Command-z>"] if aqua else [])
+        redo_seqs = ["<Control-y>", "<Control-Shift-Z>"] + (
+            ["<Command-Shift-Z>", "<Command-y>"] if aqua else [])
+        for seq in undo_seqs:
             entry.bind(seq, self._do_undo)
-        for seq in ("<Control-y>", "<Control-Shift-Z>", "<Command-Shift-Z>",
-                    "<Command-y>"):
+        for seq in redo_seqs:
             entry.bind(seq, self._do_redo)
 
     def _on_write(self, *_) -> None:
@@ -211,6 +217,8 @@ class FetchlyApp(ttk.Frame):
         url_entry = ttk.Entry(url_row, textvariable=self.url_var)
         url_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
         url_entry.focus_set()
+        url_entry.bind("<Return>", self._start_from_entry)
+        self.url_entry = url_entry
         EntryHistory(url_entry, self.url_var)
 
         self.max_pages_var = tk.StringVar(value="200")
@@ -478,6 +486,8 @@ class FetchlyApp(ttk.Frame):
         self._pages_empty = self._empty_state(
             pages_tab,
             "No pages yet.\nEnter a URL above and press  ▶  Start crawl.")
+        self.tree.bind("<Double-1>", self._show_issue_detail)
+        self.tree.bind("<Return>", self._show_issue_detail)
 
         issues_tab = ttk.Frame(self.notebook)
         self.notebook.add(issues_tab, text="Issues")
@@ -593,6 +603,55 @@ class FetchlyApp(ttk.Frame):
                 self._copy_to_clipboard(str(tree.item(row, "values")[columns.index(name)]))
                 return
 
+    def _show_error(self, title: str, message: str) -> None:
+        """Themed replacement for messagebox.showerror: modal, centered over
+        the app, styled like the rest of the GUI instead of the native box."""
+        win = tk.Toplevel(self.root, background=PALETTE["bg"])
+        win.title(title)
+        win.transient(self.root)
+        win.resizable(False, False)
+        lg, md, sm = SPACING["lg"], SPACING["md"], SPACING["sm"]
+        scale = _ui_scale(self.root)
+
+        # Same structure as the detail popup: header with a badge, a bordered
+        # surface card for the content, and a right-aligned action bar.
+        header = ttk.Frame(win)
+        header.pack(fill="x", padx=lg, pady=(lg, sm))
+        ttk.Label(header, text=title,
+                  font=(FONTS["family"], 13, "bold")).pack(side="left")
+        tk.Label(header, text="  ERROR  ", background=PALETTE["error_bg"],
+                 foreground=PALETTE["error"],
+                 font=(FONTS["family"], 9, "bold")).pack(side="right",
+                                                         padx=(lg, 0))
+
+        card = tk.Frame(win, background=PALETTE["surface"],
+                        highlightbackground=PALETTE["border"],
+                        highlightthickness=1, bd=0)
+        card.pack(fill="both", expand=True, padx=lg)
+        tk.Label(card, text=message, background=PALETTE["surface"],
+                 foreground=PALETTE["text"], justify="left", anchor="w",
+                 wraplength=round(400 * scale), padx=14, pady=12,
+                 font=(FONTS["family"], 10)).pack(fill="both", expand=True)
+
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=lg, pady=(md, lg))
+        ok = ttk.Button(bar, text="OK", style="Accent.TButton",
+                        command=win.destroy)
+        ok.pack(side="right")
+
+        win.update_idletasks()
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - w) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - h) // 3)
+        win.geometry(f"+{x}+{y}")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: win.destroy())
+        ok.focus_set()
+        try:
+            win.grab_set()  # modal, like messagebox
+        except tk.TclError:
+            pass  # not yet viewable (headless tests) — fine without the grab
+
     def _show_issue_detail(self, event=None) -> None:
         """Open a window with the selected row's full, untruncated fields.
 
@@ -609,27 +668,94 @@ class FetchlyApp(ttk.Frame):
 
         columns = tree["columns"]
         values = tree.item(row, "values")
+        by_col = dict(zip(columns, (str(v) for v in values)))
         pairs = [(tree.heading(c, "text"), str(v)) for c, v in zip(columns, values)]
         content = "\n\n".join(f"{h}:\n{v}" for h, v in pairs if v)
 
-        win = tk.Toplevel(self.root)
+        win = tk.Toplevel(self.root, background=PALETTE["bg"])
         win.title("Details")
-        scale = _ui_scale(self.root)
-        win.geometry(f"{round(560 * scale)}x{round(340 * scale)}")
         win.transient(self.root)
-        text = tk.Text(win, wrap="word", padx=10, pady=10, height=12,
-                       relief="flat", borderwidth=0, background=PALETTE["surface"],
-                       foreground=PALETTE["text"], font=(FONTS["family"], 10))
-        text.insert("1.0", content)
+        scale = _ui_scale(self.root)
+        lg, md, sm = SPACING["lg"], SPACING["md"], SPACING["sm"]
+
+        # Header: what the row is about, with a severity badge when the row
+        # carries one (issues tab) so the popup echoes the table's color cue.
+        header = ttk.Frame(win)
+        header.pack(fill="x", padx=lg, pady=(lg, sm))
+        title = by_col.get("type") or by_col.get("change") or "Page details"
+        ttk.Label(header, text=title,
+                  font=(FONTS["family"], 13, "bold")).pack(side="left")
+        severity = by_col.get("severity", "").lower()
+        badge_hues = {"error": ("error_bg", "error"),
+                      "warning": ("warning_bg", "warning")}
+        badge = None
+        if severity in badge_hues:
+            bg_key, fg_key = badge_hues[severity]
+            badge = (f"  {severity.upper()}  ", PALETTE[bg_key], PALETTE[fg_key])
+        elif by_col.get("status"):
+            # Pages rows: HTTP status badge in the table's/graph's status hue.
+            code = by_col["status"]
+            hue = ("status_ok" if code.startswith("2") else
+                   "status_redirect" if code.startswith("3") else "status_broken")
+            label = "  ERROR  " if code == "0" else f"  HTTP {code}  "
+            badge = (label, PALETTE["surface_alt"], PALETTE[hue])
+        if badge:
+            tk.Label(header, text=badge[0], background=badge[1],
+                     foreground=badge[2],
+                     font=(FONTS["family"], 9, "bold")).pack(side="right")
+
+        # Body: a bordered surface card; fields as muted small-caps labels over
+        # full, untruncated values. Read-only but still selectable for copying.
+        card = tk.Frame(win, background=PALETTE["surface"],
+                        highlightbackground=PALETTE["border"],
+                        highlightthickness=1, bd=0)
+        card.pack(fill="both", expand=True, padx=lg)
+        text = tk.Text(card, wrap="word", padx=14, pady=10, height=12,
+                       relief="flat", borderwidth=0, highlightthickness=0,
+                       background=PALETTE["surface"], foreground=PALETTE["text"],
+                       insertwidth=0, font=(FONTS["family"], 10),
+                       selectbackground=PALETTE["select"],
+                       selectforeground=PALETTE["text"])
+        vsb = ttk.Scrollbar(card, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=vsb.set)
+        text.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        text.tag_configure("field", foreground=PALETTE["muted"],
+                           font=(FONTS["family"], 8, "bold"),
+                           spacing1=lg, spacing3=2)
+        text.tag_configure("value", spacing3=2)
+        text.tag_configure("first", spacing1=2)
+        for i, (heading, value) in enumerate((h, v) for h, v in pairs if v):
+            tags = ("field", "first") if i == 0 else ("field",)
+            text.insert("end", heading.upper() + "\n", tags)
+            text.insert("end", value + "\n", ("value",))
         text.configure(state="disabled")
-        text.pack(fill="both", expand=True)
+
         bar = ttk.Frame(win)
-        bar.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Button(bar, text="Copy", command=lambda: self._copy_to_clipboard(content)
-                   ).pack(side="right", padx=(6, 0))
-        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
+        bar.pack(fill="x", padx=lg, pady=(md, lg))
+        close_btn = ttk.Button(bar, text="Close", command=win.destroy)
+        close_btn.pack(side="right")
+
+        def copy_all() -> None:
+            self._copy_to_clipboard(content)
+            copy_btn.configure(text="Copied ✓")
+            win.after(1500, lambda: copy_btn.winfo_exists()
+                      and copy_btn.configure(text="Copy details"))
+
+        copy_btn = ttk.Button(bar, text="Copy details", command=copy_all)
+        copy_btn.pack(side="right", padx=(0, sm))
+
+        # Size to content within limits, and open centered over the app.
+        w, h = round(600 * scale), round(420 * scale)
+        win.minsize(round(420 * scale), round(280 * scale))
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - w) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - h) // 3)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
         win.bind("<Escape>", lambda e: win.destroy())
-        win.focus_set()
+        win.bind("<Return>", lambda e: win.destroy())
+        close_btn.focus_set()
 
     SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -694,13 +820,27 @@ class FetchlyApp(ttk.Frame):
         if path:
             self.dictionary_var.set(path)
 
+    def _start_from_entry(self, _event=None) -> str:
+        """Enter in the Start URL box starts the crawl — ignored while a crawl
+        is running or when the box is empty (a stray Enter shouldn't nag)."""
+        if (self.url_var.get().strip()
+                and str(self.start_btn.cget("state")) != "disabled"):
+            self._start()
+        return "break"
+
     def _start(self) -> None:
+        if not self.url_var.get().strip():
+            self._show_error(
+                "No start URL",
+                "Enter the address of the website to crawl.")
+            self.url_entry.focus_set()
+            return
         try:
             config = self._read_config()
             engine = CrawlEngine(config)
             engine.start()
         except (ValueError, TypeError, RuntimeError) as exc:
-            messagebox.showerror("Invalid settings", str(exc))
+            self._show_error("Invalid settings", str(exc))
             return
         self.engine = engine
         self._last_config = config
@@ -865,7 +1005,7 @@ class FetchlyApp(ttk.Frame):
         try:
             config, results, issues = load_crawl(path)
         except (OSError, ValueError, KeyError) as exc:
-            messagebox.showerror("Cannot open crawl", str(exc))
+            self._show_error("Cannot open crawl", str(exc))
             return
         self._last_config = config
         self.results = list(results)
@@ -910,7 +1050,7 @@ class FetchlyApp(ttk.Frame):
         try:
             old, new = load_report(old_path), load_report(new_path)
         except (OSError, ValueError) as exc:
-            messagebox.showerror("Cannot compare", str(exc))
+            self._show_error("Cannot compare", str(exc))
             return
         diff = diff_reports(old, new)
 

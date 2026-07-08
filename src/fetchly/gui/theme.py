@@ -33,7 +33,9 @@ PALETTE = {
     "on_accent": "#ffffff",
     "select": "#cfe0fb",      # table row selection background
     "error": "#b23025",       # error rows / severity (text-tuned deep red)
+    "error_bg": "#f6e0dd",    # pale tint behind error badges
     "warning": "#9a6410",     # warning rows / severity (text-tuned amber)
+    "warning_bg": "#f4e8d0",  # pale tint behind warning badges
     "canvas": "#eef1f5",      # graph canvas background
     # Status hues shared with the Graph tab (viz.STATUS_COLORS) and the
     # root/main-domain marker, so the Pages table and the graph agree at a
@@ -236,7 +238,23 @@ def apply_theme(root, scale: float = 1.0) -> dict:
                     font=(family, 10))
     style.map("Treeview",
               background=[("selected", p["select"])],
-              foreground=[("selected", p["text"])])
+              foreground=[("selected", p["text"])],
+              focuscolor=[("selected", p["select"])],
+              # clam darkens the table's outline to #4a6984 (near-black) when
+              # the widget has focus; keep the hairline border in every state.
+              bordercolor=[("focus", p["border"])],
+              lightcolor=[("focus", p["border"])],
+              darkcolor=[("focus", p["border"])])
+    style.configure("Treeview", focuscolor=p["surface"])
+    # No focus ring on rows — selection already marks the current row. Tk 8.6
+    # (Windows/macOS installers) draws a dotted rectangle via the
+    # Treeitem.focus element; rebuild the item layout without it. Tk 9 has no
+    # such element and uses focuscolor instead, hidden by the settings above.
+    style.layout("Treeview.Item", [
+        ("Treeitem.padding", {"sticky": "nswe", "children": [
+            ("Treeitem.indicator", {"side": "left", "sticky": ""}),
+            ("Treeitem.image", {"side": "left", "sticky": ""}),
+            ("Treeitem.text", {"sticky": "nswe"})]})])
     style.configure("Treeview.Heading", background=p["surface_alt"],
                     foreground=p["muted"], relief="flat", borderwidth=0,
                     padding=(8, 6), font=bold)

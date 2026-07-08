@@ -89,9 +89,8 @@ def test_compare_non_report_csv_shows_error(app, monkeypatch, tmp_path):
     good = tmp_path / "good.csv"
     _write_csv(good, [{"url": "https://s.com/a", "status_code": "200"}])
 
-    from fetchly.gui import app as app_module
     errors = []
-    monkeypatch.setattr(app_module.messagebox, "showerror",
+    monkeypatch.setattr(app, "_show_error",
                         lambda title, msg: errors.append((title, msg)))
     _run_compare(app, monkeypatch, str(bad), str(good))
 
